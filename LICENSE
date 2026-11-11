@@ -1,6 +1,13 @@
+This licence covers the source code and documentation in this repository only.
+It does NOT cover the match data (videos, tracking, Smart Tagging, homography), which is separately
+licensed for the More than a Hack 2027 competition under the terms accepted at enrolment and must
+never be committed or redistributed. See THIRD_PARTY_NOTICES.md for the vendored organiser files.
+
+---
+
 MIT License
 
-Copyright (c) 2026 Josh
+Copyright (c) 2026 Mes Que un Hack team
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
