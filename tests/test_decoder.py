@@ -9,7 +9,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mqh.decoder import DecoderConfig, decode_half, viterbi_two_state  # noqa: E402
+from mqh.decoder import (DecoderConfig, clean_dead_mask, decode_half,  # noqa: E402
+                         viterbi_two_state)
 
 
 def decode(ev, dead=None, **kw):
@@ -81,6 +82,40 @@ def test_cheaper_switch_after_a_stoppage():
     dead = np.zeros(len(ev), dtype=bool)
     dead[100:110] = True                                          # a 10-frame blip is no stoppage
     assert switches(decode(ev, dead, switch_penalty=30.0)) == []
+
+
+def test_clean_dead_mask():
+    m = np.zeros(400, dtype=bool)
+    m[50:53] = True            # 3-frame dead blip inside play  -> removed
+    m[100:200] = True          # real stoppage
+    m[210:260] = True          # 10 live frames, then another real stoppage
+    m[300:310] = True          # 10-frame dead run (< 25)       -> removed
+    out = clean_dead_mask(m, 25, 25)
+    assert not out[50:53].any(), "dead blip survived"
+    assert not out[300:310].any(), "short dead run survived"
+    assert out[100:260].all(), "short live gap between stoppages was not filled"
+    assert out.sum() == 160
+    assert clean_dead_mask(np.zeros(10, dtype=bool), 25, 25).sum() == 0
+    assert clean_dead_mask(np.ones(10, dtype=bool), 25, 25).sum() == 0  # a 10-frame mask is noise
+
+
+def test_dead_blip_does_not_split_a_possession():
+    ev = np.ones(300)
+    dead = np.zeros(300, dtype=bool)
+    dead[100] = True                                   # one stray dead frame
+    cleaned = decode(ev, dead)
+    assert (cleaned == "H").all(), "possession was split by a one-frame dead blip"
+    kept = decode(ev, dead, clean_dead_mask=False)
+    assert kept[100] == "D", "with cleaning off the raw mask must pass through"
+
+
+def test_integer_decoding_ignores_float_noise():
+    rng = np.random.RandomState(5)
+    ev = np.clip(rng.normal(0, 0.5, 5000), -1, 1)
+    dead = rng.rand(5000) < 0.03
+    base = decode(ev, dead)
+    for eps in (1e-12, -1e-12, 3e-13):
+        assert (decode(ev + eps, dead) == base).all(), "last-digit float noise changed the labels"
 
 
 def test_all_dead_and_empty_halves():

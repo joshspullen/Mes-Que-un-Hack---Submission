@@ -3,7 +3,12 @@
 Input per half: a signed evidence score e in [-1, 1] per frame (+ home, - away; 0 = no
 information, e.g. the ball is not tracked) and a boolean dead-ball mask. Output: H / A / D labels.
 
-Three ideas, each justified by the structure of the task and not tuned on the match:
+Four ideas, each justified by the structure of the task and not tuned on the match:
+
+0. Clean the dead-ball mask first. "H D H" is two possessions, so one spurious dead frame inside a
+   possession splits it in two and one hole inside a stoppage invents a possession. A stoppage
+   lasts at least `restart_min_dead_frames` (1 s): shorter dead runs are removed, and live runs
+   shorter than `min_live_between_dead_frames` that sit between two dead runs are filled in.
 
 1. Viterbi with a switch penalty. Staying in a state costs -e (home) or +e (away); changing team
    costs `switch_penalty`. A run of L frames can only be supported if its evidence outweighs the
@@ -12,59 +17,86 @@ Three ideas, each justified by the structure of the task and not tuned on the ma
    evidence at 25 fps for the default 30).
 
 2. Cheaper switches after a stoppage. A dead-ball stretch ends the previous possession by
-   definition ("H D H" is two possessions), so continuity of the old team is a weaker prior at a
-   restart than in open play. The penalty is multiplied by `restart_switch_scale` on the first live
-   frame after a dead stretch of at least `restart_min_dead_frames`.
+   definition, so continuity of the old team is a weaker prior at a restart than in open play.
+   The penalty is multiplied by `restart_switch_scale` on the first live frame after a stoppage.
 
 3. Where to put a handover that happens while the evidence is silent. Inside a stretch with no
-   informative frames (typically a ball dropout) every position for the switch costs the same, so
-   the Viterbi tie-break puts it arbitrarily. We place it where the error is smallest in
-   expectation: at the restart if a dead stretch lies in the stretch (that is when a new possession
-   starts), otherwise at the midpoint (a uniform prior on the true time minimises the expected
-   boundary error, which is what temporal IoU punishes). The cost is unchanged, because only
-   frames with ~zero evidence move.
+   informative frames (typically a ball dropout) every position for the switch costs the same,
+   except that switching right after a stoppage costs `restart_switch_scale` times less, so the
+   restart is the most probable place when one lies in the stretch; otherwise a uniform prior on
+   the true time makes the midpoint minimise the expected boundary error, which is what temporal
+   IoU punishes. The evidence cost is unchanged, because only silent frames move.
 
-No randomness anywhere: the same input gives the same labels.
+Exactly reproducible: the decoder works in integers (evidence rounded to 1/SCALE), so the same
+input gives the same labels on any machine, regardless of floating-point library differences.
+No randomness anywhere.
 """
 
 from dataclasses import dataclass
 
 import numpy as np
 
+SCALE = 10_000  # evidence and penalties are rounded to 1/SCALE and decoded as integers
+
 
 @dataclass(frozen=True)
 class DecoderConfig:
     switch_penalty: float = 30.0         # frames' worth of evidence needed to change team
     restart_switch_scale: float = 0.5    # penalty multiplier right after a stoppage
-    restart_min_dead_frames: int = 25    # 1 s: shorter dead blips are not a real stoppage
+    restart_min_dead_frames: int = 25    # 1 s: a real stoppage lasts at least this long
     place_switch_in_gaps: bool = True    # idea 3
     info_min: float = 0.05               # |evidence| below this carries ~no information
+    clean_dead_mask: bool = True         # idea 0
+    min_live_between_dead_frames: int = 25  # 1 s: a live burst this short between stoppages is noise
+
+
+def _runs(mask):
+    """(starts, ends_exclusive) of each True run."""
+    padded = np.concatenate(([0], np.asarray(mask, dtype=np.int8), [0]))
+    d = np.diff(padded)
+    return np.flatnonzero(d == 1), np.flatnonzero(d == -1)
+
+
+def clean_dead_mask(dead, min_dead, min_live_between):
+    """Remove dead runs shorter than min_dead, then fill live gaps shorter than min_live_between
+    that sit between two dead runs. Never changes the length or crosses the array edges."""
+    out = np.asarray(dead, dtype=bool).copy()
+    for a, b in zip(*_runs(out)):
+        if b - a < min_dead:
+            out[a:b] = False
+    starts, ends = _runs(out)
+    for i in range(len(starts) - 1):
+        if starts[i + 1] - ends[i] < min_live_between:
+            out[ends[i]:starts[i + 1]] = True
+    return out
+
+
+def _quantise(x):
+    return np.rint(np.asarray(x, dtype=float) * SCALE).astype(np.int64)
 
 
 def viterbi_two_state(evidence, penalty):
     """State path (0 = home, 1 = away) minimising sum(cost) + sum(penalty at each switch).
 
     `penalty` is a scalar, or one value per step: penalty[t] is the cost of switching between
-    step t-1 and step t. Ties prefer staying in the current state.
+    step t-1 and step t. Ties prefer staying in the current state. All arithmetic is on integers
+    (evidence and penalty rounded to 1/SCALE), so the result does not depend on the platform.
     """
     n = len(evidence)
     if n == 0:
         return np.zeros(0, dtype=np.int8)
-    pen = np.broadcast_to(np.asarray(penalty, dtype=float), (n,))
-    cost_home = -evidence
-    cost_away = evidence
+    ev = _quantise(evidence).tolist()
+    pen = _quantise(np.broadcast_to(np.asarray(penalty, dtype=float), (n,))).tolist()
     back_h = np.zeros(n, dtype=bool)  # True: the best path into "home" at t came from away
     back_a = np.zeros(n, dtype=bool)  # True: the best path into "away" at t came from home
-    ch, ca = cost_home[0], cost_away[0]
+    ch, ca = -ev[0], ev[0]            # cost of being home / away so far
     for t in range(1, n):
-        p = pen[t]
-        from_a = ca + p
-        from_h = ch + p
-        back_h[t] = from_a < ch
-        back_a[t] = from_h < ca
-        nh = min(ch, from_a) + cost_home[t]
-        na = min(ca, from_h) + cost_away[t]
-        ch, ca = nh, na
+        from_a = ca + pen[t]
+        from_h = ch + pen[t]
+        bh = from_a < ch
+        ba = from_h < ca
+        back_h[t], back_a[t] = bh, ba
+        ch, ca = (from_a if bh else ch) - ev[t], (from_h if ba else ca) + ev[t]
     state = 0 if ch <= ca else 1
     path = np.empty(n, dtype=np.int8)
     for t in range(n - 1, -1, -1):
@@ -115,6 +147,8 @@ def decode_half(evidence, dead, first, last, cfg=DecoderConfig()):
     """H / A / D labels for video frames first..last inclusive."""
     sl = slice(first, last + 1)
     ev, dd = evidence[sl], dead[sl]
+    if cfg.clean_dead_mask:
+        dd = clean_dead_mask(dd, cfg.restart_min_dead_frames, cfg.min_live_between_dead_frames)
     labels = np.full(ev.shape, "D", dtype="<U1")
     live_idx = np.flatnonzero(~dd)
     if live_idx.size == 0:
@@ -131,7 +165,8 @@ def decode_half(evidence, dead, first, last, cfg=DecoderConfig()):
 
     path = viterbi_two_state(ev_live, penalty)
     if cfg.place_switch_in_gaps:
-        path = place_switches(path, np.abs(ev_live) > cfg.info_min, restart_before)
+        informative = np.abs(_quantise(ev_live)) > int(round(cfg.info_min * SCALE))
+        path = place_switches(path, informative, restart_before)
 
     labels[live_idx] = np.where(path == 0, "H", "A")
     return labels

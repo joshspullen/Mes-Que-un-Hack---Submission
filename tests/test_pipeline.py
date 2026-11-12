@@ -78,7 +78,9 @@ def main():
         assert (zero_gaps == none).all(), "a gap hook with no opinion must change nothing"
 
         truth_dead = truth == "D"
-        with_restarts = run(raw, meta, Config(),
+        # cleaning off here: it (rightly) drops dead runs shorter than 1 s, and the synthetic match
+        # has a few truncated ones at the end of a half; this check is only about the plumbing
+        with_restarts = run(raw, meta, Config(decoder=DecoderConfig(clean_dead_mask=False)),
                             hooks={"restarts": lambda n_frames, game: truth_dead.copy()})
         assert (with_restarts[truth_dead] == "D").all(), "restart hook mask was not applied"
         print("hook plumbing ok (dead frames forced to D: {})".format(int(truth_dead.sum())))
@@ -94,6 +96,22 @@ def main():
             else:
                 raise AssertionError("bad {} hook was accepted".format(name))
         print("bad hooks are rejected with the hook's name")
+
+        # restart-team evidence: tell the decoder which team restarts, from the (synthetic) truth
+        push = np.zeros(n)
+        for i in range(1, n):
+            if truth[i - 1] == "D" and truth[i] in ("H", "A"):
+                push[i:i + 50] = 0.8 if truth[i] == "H" else -0.8
+        with_team = run(raw, meta, Config(), hooks={"restart_team": lambda n_frames, game: push})
+        acc_with = float(np.mean(with_team[graded] == truth[graded]))
+        print("restart-team evidence: accuracy {:.3f} -> {:.3f}".format(acc, acc_with))
+        assert acc_with >= acc, "restart-team evidence made things worse on a world where it is exact"
+        try:
+            run(raw, meta, Config(), hooks={"restart_team": lambda n_frames, game: push * 5})
+        except ValueError as error:
+            assert "restart_evidence" in str(error), str(error)
+        else:
+            raise AssertionError("out-of-range restart_evidence was accepted")
     print("OK")
 
 

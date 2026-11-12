@@ -1,0 +1,26 @@
+{
+  "config": {
+    "decoder": {
+      "clean_dead_mask": true,
+      "info_min": 0.05,
+      "min_live_between_dead_frames": 25,
+      "place_switch_in_gaps": true,
+      "restart_min_dead_frames": 25,
+      "restart_switch_scale": 0.5,
+      "switch_penalty": 30.0
+    },
+    "margin_scale_m": 2.0,
+    "oob_close_frames": 50,
+    "oob_margin": 0.002,
+    "oob_tail_frames": 25,
+    "proximity_scale_m": 6.0,
+    "still_close_frames": 10,
+    "still_min_frames": 75,
+    "still_speed_ms": 0.5,
+    "use_out_of_bounds": true,
+    "use_pre_kickoff": true,
+    "use_stationary": true
+  },
+  "labels_sha256": "047c692157771ed3016a50b7c5dfa8a61286bf205006a7dc364808df9f7df1ec",
+  "world": "synth turnover=0.4 seed=11 dead_flip=0.5"
+}

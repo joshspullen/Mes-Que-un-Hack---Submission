@@ -36,6 +36,4 @@ venv/
 .DS_Store
 .idea/
 .vscode/
-
-# run logs
-*.log
+submissions/*.manifest.json

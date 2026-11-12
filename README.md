@@ -16,14 +16,18 @@ python make_submission.py --team-name <team_name>
 
 This writes `submissions/<team_name>.csv` and runs the official validator on it. The pipeline has no
 randomness, so the same data gives the same file. For the final freeze, also run
-`pip freeze > requirements-lock.txt` and commit it.
+`pip freeze > requirements-lock.txt` and commit it. It also writes `submissions/<team_name>.manifest.json`
+(sha256 of the CSV, config, git commit, versions); `python tools/repro_check.py` regenerates the file and
+compares hashes.
 
 ## Check it
 
 ```bash
 python tests/test_decoder.py                                   # decoder unit tests, ~1 s
 python tests/test_pipeline.py                                  # synthetic match, no data needed, ~40 s
+python tests/test_golden.py                                    # fixed made-up match must hash to tests/golden.json
 python tools/diagnostics.py submissions/<team_name>.csv        # per-half sanity numbers
+python tools/stoppage_stats.py                                 # external-data stoppage rates (downloads Metrica samples)
 cp submissions/<team_name>.csv evaluation/results/
 python evaluation/run_evaluation.py --bootstrap 1000          # public 5 minutes: correctness only
 ```

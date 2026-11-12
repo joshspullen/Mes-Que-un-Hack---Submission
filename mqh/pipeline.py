@@ -4,6 +4,7 @@ Owner: stream 5 (integration). Other streams plug in through two optional hooks,
 automatically when their files exist (see docs/INTERFACES.md):
 
     mqh/restarts.py  restart_dead_mask(n_frames, game)                      -> bool  (n_frames,)
+    mqh/restarts.py  restart_evidence(n_frames, game)   (extra, optional)   -> float (n_frames,)
     mqh/gaps.py      gap_evidence(ball, players, team_of_slot, pitch, fps)  -> float (n_frames,)
 
 A hook that is absent is simply skipped. A hook that exists but returns the wrong shape or type
@@ -24,9 +25,12 @@ from mqh.decoder import DecoderConfig, decode_half
 # FAQ.md: the second half is graded from 110808 but kicks off at 113742; the gap is all dead ball.
 SECOND_HALF_KICKOFF = 113742
 
+# name: (module, function, required). A module that exists but lacks a *required* function is an
+# error; a missing optional function is simply skipped.
 HOOKS = {
-    "restarts": ("mqh.restarts", "restart_dead_mask"),
-    "gaps": ("mqh.gaps", "gap_evidence"),
+    "restarts": ("mqh.restarts", "restart_dead_mask", True),
+    "restart_team": ("mqh.restarts", "restart_evidence", False),
+    "gaps": ("mqh.gaps", "gap_evidence", True),
 }
 
 
@@ -57,7 +61,7 @@ class Config:
 def discover_hooks():
     """{name: function} for every hook module that exists. Absent modules are skipped."""
     found = {}
-    for key, (module, attr) in HOOKS.items():
+    for key, (module, attr, required) in HOOKS.items():
         try:
             mod = importlib.import_module(module)
         except ModuleNotFoundError as error:
@@ -65,8 +69,10 @@ def discover_hooks():
                 continue
             raise
         if not hasattr(mod, attr):
-            raise AttributeError("{} exists but has no {}(); see docs/INTERFACES.md".format(
-                module, attr))
+            if required:
+                raise AttributeError("{} exists but has no {}(); see docs/INTERFACES.md".format(
+                    module, attr))
+            continue
         found[key] = getattr(mod, attr)
     return found
 
@@ -115,6 +121,11 @@ def prepare(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None, hooks=N
                        hooks["gaps"](ball, players, team_of_slot, pitch, fps), n_frames, "float")
         missing = np.isnan(ball[:, 0])
         evidence = np.where(missing, np.clip(gap, -1.0, 1.0), evidence)
+    if "restart_team" in hooks:
+        push = _checked("restart_evidence", hooks["restart_team"](n_frames, game), n_frames, "float")
+        if np.abs(push).max() > 1.0:
+            raise ValueError("restart_evidence() must stay within [-1, 1]")
+        evidence = np.clip(evidence + push, -1.0, 1.0)
     return evidence, dead, blocks, n_frames
 
 

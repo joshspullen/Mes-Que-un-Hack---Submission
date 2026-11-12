@@ -43,6 +43,13 @@ v0 has **no learned components and no training data**; every parameter is a reas
 and labels line up, never to choose a parameter. **TODO** if later versions learn anything: list
 each dataset, its source, who labelled it and how much; none may come from the provided game.
 
+**External data used for one prior (not for fitting).** Metrica Sports sample games 1 and 2
+(anonymised event data, https://github.com/metrica-sports/sample-data; its README asks that public
+use acknowledges the source). `tools/stoppage_stats.py` measures how often possession changes team
+across a restart (throw-in 97%, corner 100%, free kick 27%, all restarts 67%, n = 144). This
+supports the sign of one assumption behind `restart_switch_scale`; no constant is fitted to it and
+the data is downloaded at run time, not stored in the repository.
+
 ## 4. Possession rules implemented
 
 - A possession is a maximal run of one team with the ball alive; dead ball is a stoppage, never a
