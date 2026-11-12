@@ -7,6 +7,7 @@
       "place_switch_in_gaps": true,
       "restart_min_dead_frames": 25,
       "restart_switch_scale": 0.5,
+      "snap_window_frames": 0,
       "switch_penalty": 30.0
     },
     "margin_scale_m": 2.0,
@@ -21,6 +22,6 @@
     "use_pre_kickoff": true,
     "use_stationary": true
   },
-  "labels_sha256": "047c692157771ed3016a50b7c5dfa8a61286bf205006a7dc364808df9f7df1ec",
+  "labels_sha256": "8e49fae618eb8c855870a731dbd6a21171af48c8f0139a62aabe2adb7e82cb96",
   "world": "synth turnover=0.4 seed=11 dead_flip=0.5"
 }

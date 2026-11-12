@@ -102,3 +102,23 @@ gaps always helps; the restart discount helps or is neutral across the whole ran
 
 Add a row here for every constant you introduce, with the reason. "It looked better on the public
 5 minutes" is not a reason and is against the rules.
+
+## Stream 3: `EvidenceConfig` (`mqh/decode.py`)
+
+`team_evidence` = vote x w_near x w_speed x w_contest (formula in the docstring). Its constants live
+in `EvidenceConfig`. `margin_scale_m` and `proximity_scale_m` are also still in `Config` above;
+when `team_evidence` is given `Config`, those two values are taken from it and the rest from
+`EvidenceConfig` defaults, so the two places cannot disagree silently. None of these values were
+tuned on this match.
+
+| constant | value | why | status |
+|---|---|---|---|
+| `margin_share` | 0.6 | mix of the nearest-player margin vote and the nearby-player count vote; the margin stays the main signal, the count breaks near-ties when several players are around the ball | reasoned |
+| `support_radius_m` | 4.0 | Gaussian radius for the soft count of each team's players around the ball: about two strides, the distance from which a player can reach the ball within a second | reasoned |
+| `support_eps` | 0.5 | pseudo-count in the count vote, so a single distant player does not give a full +-1 vote | reasoned |
+| `speed_mid_ms` | 10.0 | ball speed at which the vote is halved: dribbles stay well below, passes and shots are well above, so a flying ball mostly does not vote for whoever it passes near | reasoned |
+| `speed_width_ms` | 2.0 | softness of that cut, so tracking noise around 10 m/s does not flip the weight | reasoned |
+| `speed_floor` | 0.2 | a flying ball keeps a fifth of its vote; exact zeros right before a stoppage let the decoder park a switch there and create 3-frame fake spells | reasoned; to recheck with stream 5's gap placement, which puts handovers inside stretches without informative evidence |
+| `speed_half_window` | 3 | ball speed from a centred difference over +-3 frames (0.12 s each side at 25 fps); a one-frame difference turns ~0.3 m of jitter into ~10 m/s and every dribble would look like a pass (`test_jitter_is_not_a_pass`) | reasoned |
+| `contest_radius_m` | 1.5 | both teams this close to the ball counts as a duel | reasoned |
+| `contest_floor` | 0.35 | vote multiplier for a fully contested ball: weaker, not zero, so a duel neither drives nor blocks a switch on its own | reasoned |
