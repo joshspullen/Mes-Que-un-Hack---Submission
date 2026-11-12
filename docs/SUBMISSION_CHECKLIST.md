@@ -37,6 +37,7 @@ Owners: **I** = integrator, **B** = dead ball, **C** = decoder, **D** = report. 
 - [ ] `pip freeze > requirements-lock.txt`, commit it.
 - [ ] `python make_submission.py --team-name TEAM_NAME`
 - [ ] Sanity: possession count and mean duration plausible; `D` share plausible; both halves look similar; `X` only outside the graded halves.
+- [ ] One-time alignment check on the **frozen** file only: `python evaluation/run_evaluation.py` on the public 5 minutes, run once, result written in the report. It is there to catch a frame-offset or label bug, not to rank versions: a low score is not a reason to change anything, a misalignment is. Nobody reads `evaluation/gt/` before this point.
 - [ ] `python tools/repro_check.py` prints PASS; paste the sha256 into the technical document.
 - [ ] Fresh clone proof: clone to a new folder, copy data in, install, run `repro_check`, same hash. Write down who and when in the report.
 - [ ] `python tools/preflight.py --team-name TEAM_NAME --final` shows 0 FAIL.

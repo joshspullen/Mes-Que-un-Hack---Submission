@@ -3,7 +3,7 @@
 Input per half: a signed evidence score e in [-1, 1] per frame (+ home, - away; 0 = no
 information, e.g. the ball is not tracked) and a boolean dead-ball mask. Output: H / A / D labels.
 
-Four ideas, each justified by the structure of the task and not tuned on the match:
+Five ideas, each justified by the structure of the task and not tuned on the match:
 
 0. Clean the dead-ball mask first. "H D H" is two possessions, so one spurious dead frame inside a
    possession splits it in two and one hole inside a stoppage invents a possession. A stoppage
@@ -27,6 +27,9 @@ Four ideas, each justified by the structure of the task and not tuned on the mat
    the true time makes the midpoint minimise the expected boundary error, which is what temporal
    IoU punishes. The evidence cost is unchanged, because only silent frames move.
 
+4. Snap each team change onto the new team's first touch when stream 3 provides touches
+   (`mqh/refine.py`, applied by the pipeline after decoding).
+
 Exactly reproducible: the decoder works in integers (evidence rounded to 1/SCALE), so the same
 input gives the same labels on any machine, regardless of floating-point library differences.
 No randomness anywhere.
@@ -48,6 +51,7 @@ class DecoderConfig:
     info_min: float = 0.05               # |evidence| below this carries ~no information
     clean_dead_mask: bool = True         # idea 0
     min_live_between_dead_frames: int = 25  # 1 s: a live burst this short between stoppages is noise
+    snap_window_frames: int = 0          # idea 4 (mqh/refine.py); 0 = off until validated, see DECISIONS.md
 
 
 def _runs(mask):

@@ -20,5 +20,6 @@ jobs:
             echo "A file that must never be public is tracked by git"; exit 1
           fi
       - run: python tests/test_decoder.py
+      - run: python tests/test_refine.py
       - run: python tests/test_pipeline.py
       - run: python tests/test_golden.py

@@ -21,6 +21,25 @@ and 6 of the technical document.
 | abstention (`X`) on graded frames | never | the scorer fills an `X` with the previous label before matching possessions, so inside a gap `X` and "hold the state" score the same on `spellF1`, while `X` costs on `macroF1` (the tie-break). At a handover `X` is worse, because the old label carries over | decided |
 | `X` outside the two graded halves | always | never scored | given |
 
+### Ideas taken from the team plan (competitors' write-ups), stream 5 only
+
+Source: `Plan de projet — Hackathon FCB possession (5 rôles)`, which summarises ZesterJ, Letinsh,
+TrymBardsen and Barca-Hackathon / ZainnB. Their scores are reported second-hand and were not
+reproduced here.
+
+| idea | decision | why |
+|---|---|---|
+| snap each H<->A change onto the new team's first touch within +-1 s (R5 item 3, "8 frames late costs 11 points") | **built, off by default** (`mqh/refine.py`, hook `mqh/touches.py`, `snap_window_frames` = 0) | needs a touch detector from stream 3 that does not exist yet. On synthetic matches it is neutral (spellF1 0.842 -> 0.842 and 0.826 -> 0.826 on two seeds; with deliberately noisy touches boundary error got slightly worse), so it only goes on if the external bench shows a gain beyond the noise |
+| tune constants by directly maximising spellF1 on external matches, leave-one-match-out, with the official scorer; keep the simplest setting within the noise band | **built** (`tools/tune_decoder.py`) | needs external cases (stream 2 of the plan). Works now on synthetic cases to show the procedure; the real numbers must come from external matches degraded like our tracking |
+| ablation table, baseline to full | **built into the same tool** | the tool prints plain Viterbi, + mask cleaning, + place in gaps, + cheaper restart per case |
+| X only outside the graded halves | already ours | the scorer fills X with the previous label, so it only costs macroF1 |
+| minimum durations on dead and live phases (state expansion) | already ours, as `clean_dead_mask` (1 s dead, 1 s live burst) and the switch penalty | a hard minimum possession `m` is covered by the penalty; adding it would double the knobs |
+| two-stage decoding with a soft `p_dead` (Viterbi on log p_dead first) | not built | our dead streams give hard masks. `viterbi_two_state` already accepts a per-step penalty, so this is a ten-line change the day a calibrated `p_dead` exists |
+| calibrated `p_home` from a learned control model | not built | no learned model exists. The decoder takes a signed score, `p_home` would enter as `logit(p)/2` clipped to [-1, 1], and the penalty would need re-deriving |
+| HSMM with typical possession and stoppage durations | not built | durations we could estimate externally would mostly restate the penalty; unverifiable until the external bench exists |
+| self-training on BAR-ATH pseudo-labels, 5-seed ensembles, domain weighting | not stream 5 | they act on learned models (streams 3 and 4 of the plan); v0 has none. The plan itself says to validate self-training on an external match first |
+| a script that alone reads the public ground truth, once, after the freeze | adopted as a rule | see `docs/SUBMISSION_CHECKLIST.md`, freeze protocol |
+
 ### External evidence on stoppages (`tools/stoppage_stats.py`)
 
 The restart discount rests on the assumption that possession often changes team across a stoppage.

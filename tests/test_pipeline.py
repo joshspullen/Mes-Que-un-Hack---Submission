@@ -72,7 +72,7 @@ def main():
         # The synthetic world has no Smart Tagging file, so these tests switch auto-discovery off
         # (hooks={}) and inject fakes. Streams 1 and 4 test their own modules.
         none = labels
-        assert set(discover_hooks()) <= {"restarts", "gaps"}, "unknown hook discovered"
+        assert set(discover_hooks()) <= {"restarts", "gaps", "touches"}, "unknown hook discovered"
 
         zero_gaps = run(raw, meta, Config(), hooks={"gaps": lambda *a: np.zeros(n)})
         assert (zero_gaps == none).all(), "a gap hook with no opinion must change nothing"
@@ -112,6 +112,29 @@ def main():
             assert "restart_evidence" in str(error), str(error)
         else:
             raise AssertionError("out-of-range restart_evidence was accepted")
+
+        # touches: the plug-in for boundary snapping (off by default, so a new hook cannot silently
+        # change the submission). Fake touches at the true possession starts.
+        t_frames = np.array([i for i in range(1, n) if truth[i] in "HA" and truth[i] != truth[i - 1]])
+        t_teams = np.array([0 if truth[i] == "H" else 1 for i in t_frames])
+        touch_hook = lambda *a: (t_frames, t_teams)   # noqa: E731
+        off = run(raw, meta, Config(), hooks={"touches": touch_hook})
+        assert (off == labels).all(), "touches must change nothing while snap_window_frames == 0"
+        on = run(raw, meta, Config(decoder=DecoderConfig(snap_window_frames=25)),
+                 hooks={"touches": touch_hook})
+        assert on.shape == labels.shape and set(np.unique(on)) <= set("HADX")
+        assert (on[~graded] == "X").all() and (on[graded] != "X").all()
+        print("touches hook ok: {} frames moved when enabled".format(int(np.sum(on != labels))))
+        for bad in [lambda *a: np.zeros(5), lambda *a: (np.array([0.5]), np.array([0])),
+                    lambda *a: (np.array([n + 5]), np.array([0])),
+                    lambda *a: (np.array([5]), np.array([2])),
+                    lambda *a: (np.array([5, 6]), np.array([0]))]:
+            try:
+                run(raw, meta, Config(), hooks={"touches": bad})
+            except ValueError as error:
+                assert "touch_events" in str(error), str(error)
+            else:
+                raise AssertionError("bad touch_events hook was accepted")
     print("OK")
 
 

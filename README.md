@@ -25,6 +25,7 @@ compares hashes.
 ```bash
 python tests/test_decoder.py                                   # decoder unit tests, ~1 s
 python tests/test_pipeline.py                                  # synthetic match, no data needed, ~40 s
+python tests/test_refine.py                                    # touch snapping unit tests, ~1 s
 python tests/test_golden.py                                    # fixed made-up match must hash to tests/golden.json
 python tools/diagnostics.py submissions/<team_name>.csv        # per-half sanity numbers
 python tools/stoppage_stats.py                                 # external-data stoppage rates (downloads Metrica samples)

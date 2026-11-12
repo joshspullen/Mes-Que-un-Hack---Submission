@@ -6,6 +6,7 @@ automatically when their files exist (see docs/INTERFACES.md):
     mqh/restarts.py  restart_dead_mask(n_frames, game)                      -> bool  (n_frames,)
     mqh/restarts.py  restart_evidence(n_frames, game)   (extra, optional)   -> float (n_frames,)
     mqh/gaps.py      gap_evidence(ball, players, team_of_slot, pitch, fps)  -> float (n_frames,)
+    mqh/touches.py   touch_events(ball, players, team_of_slot, pitch, fps)  -> (frames, teams)
 
 A hook that is absent is simply skipped. A hook that exists but returns the wrong shape or type
 fails loudly with its name, so one stream cannot silently break another.
@@ -21,6 +22,7 @@ from mqh.atd import load_atd
 from mqh.dead import ball_speed_ms, dead_mask
 from mqh.decode import team_evidence
 from mqh.decoder import DecoderConfig, decode_half
+from mqh.refine import snap_switches
 
 # FAQ.md: the second half is graded from 110808 but kicks off at 113742; the gap is all dead ball.
 SECOND_HALF_KICKOFF = 113742
@@ -31,6 +33,7 @@ HOOKS = {
     "restarts": ("mqh.restarts", "restart_dead_mask", True),
     "restart_team": ("mqh.restarts", "restart_evidence", False),
     "gaps": ("mqh.gaps", "gap_evidence", True),
+    "touches": ("mqh.touches", "touch_events", True),
 }
 
 
@@ -95,12 +98,8 @@ def _checked(name, array, n_frames, kind):
     return array
 
 
-def prepare(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None, hooks=None):
-    """Everything before the decoder: (evidence, dead mask, half blocks, n_frames).
-
-    hooks=None finds the optional stream modules automatically; hooks={} disables them; a dict
-    injects functions (used by the tests).
-    """
+def _prepare_all(raw_path, meta_path, cfg, game, n_frames, hooks):
+    """(evidence, dead, blocks, n_frames, touches) with touches = (frames, teams) or None."""
     n_frames = n_frames or GAMES[game]["n_video_frames"]
     pitch = GAMES[game]["pitch"]
     fps = GAMES[game]["fps"]
@@ -126,20 +125,61 @@ def prepare(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None, hooks=N
         if np.abs(push).max() > 1.0:
             raise ValueError("restart_evidence() must stay within [-1, 1]")
         evidence = np.clip(evidence + push, -1.0, 1.0)
-    return evidence, dead, blocks, n_frames
+    touches = None
+    if "touches" in hooks:
+        touches = _checked_touches(hooks["touches"](ball, players, team_of_slot, pitch, fps), n_frames)
+    return evidence, dead, blocks, n_frames, touches
 
 
-def decode(evidence, dead, blocks, n_frames, dcfg=DecoderConfig()):
-    """Labels for the whole video: decoded inside the graded halves, X everywhere else."""
+def _checked_touches(result, n_frames):
+    """Validate touch_events(): (frames, teams) of equal length, frames in range, teams 0 or 1."""
+    try:
+        frames, teams = result
+        frames, teams = np.asarray(frames), np.asarray(teams)
+    except (TypeError, ValueError):
+        raise ValueError("touch_events() must return a pair (frames, teams)")
+    if frames.ndim != 1 or frames.shape != teams.shape:
+        raise ValueError("touch_events() frames and teams must be 1-D arrays of equal length")
+    if frames.size == 0:
+        return frames.astype(np.int64), teams.astype(np.int64)
+    if not (np.issubdtype(frames.dtype, np.integer) and np.issubdtype(teams.dtype, np.integer)):
+        raise ValueError("touch_events() must return integer arrays")
+    if frames.min() < 0 or frames.max() >= n_frames:
+        raise ValueError("touch_events() frames must lie in [0, {})".format(n_frames))
+    if not np.isin(teams, [0, 1]).all():
+        raise ValueError("touch_events() teams must be 0 (home) or 1 (away)")
+    return frames.astype(np.int64), teams.astype(np.int64)
+
+
+def prepare(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None, hooks=None):
+    """Everything before the decoder: (evidence, dead mask, half blocks, n_frames).
+
+    hooks=None finds the optional stream modules automatically; hooks={} disables them; a dict
+    injects functions (used by the tests).
+    """
+    return _prepare_all(raw_path, meta_path, cfg, game, n_frames, hooks)[:4]
+
+
+def decode(evidence, dead, blocks, n_frames, dcfg=DecoderConfig(), touches=None):
+    """Labels for the whole video: decoded inside the graded halves, X everywhere else.
+
+    touches=(frames, teams) from stream 3 snaps each team change onto the new team's first touch.
+    """
     labels = np.full(n_frames, "X", dtype="<U1")
     for _, first, last in blocks:
-        labels[first:last + 1] = decode_half(evidence, dead, first, last, dcfg)
+        half = decode_half(evidence, dead, first, last, dcfg)
+        if touches is not None:
+            inside = (touches[0] >= first) & (touches[0] <= last)
+            half = snap_switches(half, touches[0][inside] - first, touches[1][inside],
+                                 dcfg.snap_window_frames)
+        labels[first:last + 1] = half
     return labels
 
 
 def run(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None, hooks=None):
-    evidence, dead, blocks, n_frames = prepare(raw_path, meta_path, cfg, game, n_frames, hooks)
-    return decode(evidence, dead, blocks, n_frames, cfg.decoder)
+    evidence, dead, blocks, n_frames, touches = _prepare_all(
+        raw_path, meta_path, cfg, game, n_frames, hooks)
+    return decode(evidence, dead, blocks, n_frames, cfg.decoder, touches)
 
 
 def write_csv(path, labels):

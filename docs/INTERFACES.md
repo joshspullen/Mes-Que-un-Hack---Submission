@@ -11,6 +11,7 @@ files you do not own; `mqh/pipeline.py` is stream 5's and combines everything.
 | 3 ball control | `mqh/decode.py` | `team_evidence(ball, players, team_of_slot, pitch, cfg)` (exists) | `float (n_frames,)` in [-1, 1], + home, - away, 0 = no opinion |
 | 1b restart team (extra, optional) | `mqh/restarts.py` | `restart_evidence(n_frames, game)` | `float (n_frames,)` in [-1, 1], + home, - away, 0 = no opinion; a push added to the evidence, e.g. the team awarded a restart from Smart Tagging. Throw-ins carry no team in the tags, so leave them 0 |
 | 4 handovers in ball gaps | `mqh/gaps.py` | `gap_evidence(ball, players, team_of_slot, pitch, fps)` | `float (n_frames,)` in [-1, 1], same sign convention; only the frames where the ball is not tracked are used |
+| 3b touches (optional) | `mqh/touches.py` | `touch_events(ball, players, team_of_slot, pitch, fps)` | `(frames, teams)`: two equal-length 1-D integer arrays, video frames in `[0, n_frames)` and team 0 = home / 1 = away. Used to snap team changes onto the new team's first touch (`mqh/refine.py`). **Inert until `DecoderConfig.snap_window_frames` > 0**, which is decided on external data |
 | 5 decoder + integration | `mqh/decoder.py`, `mqh/pipeline.py` | `decode_half`, `prepare`, `decode`, `run` | labels `H/A/D/X` |
 
 ## How they are combined
@@ -21,6 +22,7 @@ evidence = team_evidence(...)                                    # stream 3
 evidence = clip(evidence + restart_evidence(...), -1, 1)         # stream 1, optional
 evidence[ball missing] = gap_evidence(...)[ball missing]         # stream 4, clipped to [-1, 1]
 labels   = decode_half(evidence, dead, ...) for each half        # stream 5
+labels   = snap_switches(labels, touches)                        # only if snap_window_frames > 0
 ```
 
 Streams 1 and 4 are **optional plug-ins**: create the file with the function above and the
@@ -53,6 +55,9 @@ output is bit-identical on any machine.
 - `python tests/test_decoder.py`: unit tests of the decoder, a second.
 - `python tests/test_golden.py`: a fixed made-up match must hash to the value in `tests/golden.json`
   (run with `--update` only after an intended change). CI runs all three tests on every pull request.
+- `python tests/test_refine.py`: unit tests of touch snapping.
+- `python tools/tune_decoder.py --cases <folder>`: leave-one-match-out choice of decoder constants on
+  external cases (`--synthetic` shows the procedure on made-up matches).
 - `python tests/test_pipeline.py`: the synthetic match end to end, about 40 s. It switches
   auto-discovery off (`hooks={}`) and injects fakes, so your module cannot break it.
 - Add your own `tests/test_<stream>.py`. For stream 1, build a tiny made-up Smart Tagging XML in
