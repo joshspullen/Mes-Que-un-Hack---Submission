@@ -17,19 +17,22 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from games import require  # noqa: E402
-from mqh.pipeline import Config, run, write_csv  # noqa: E402
+from mqh.decoder import DecoderConfig  # noqa: E402
+from mqh.pipeline import Config, discover_hooks, run, write_csv  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--team-name", required=True, help="registered team name (names the file)")
     parser.add_argument("--out-dir", default=os.path.join(HERE, "submissions"))
-    parser.add_argument("--switch-penalty", type=float, default=Config.switch_penalty)
+    parser.add_argument("--switch-penalty", type=float, default=DecoderConfig.switch_penalty)
     args = parser.parse_args()
 
     meta_path, raw_path = require(["atd_meta", "atd_raw"])
-    cfg = Config(switch_penalty=args.switch_penalty)
-    labels = run(raw_path, meta_path, cfg)
+    cfg = Config(decoder=DecoderConfig(switch_penalty=args.switch_penalty))
+    hooks = discover_hooks()
+    print("optional streams active:", ", ".join(sorted(hooks)) or "none")
+    labels = run(raw_path, meta_path, cfg, hooks=hooks)
 
     os.makedirs(args.out_dir, exist_ok=True)
     out = os.path.join(args.out_dir, args.team_name + ".csv")

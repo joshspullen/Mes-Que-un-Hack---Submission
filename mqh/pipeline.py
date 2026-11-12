@@ -1,27 +1,46 @@
-"""End to end: tracking -> frame,label array for the whole video."""
+"""End to end: tracking -> frame,label array for the whole video.
 
-from dataclasses import dataclass
+Owner: stream 5 (integration). Other streams plug in through two optional hooks, found
+automatically when their files exist (see docs/INTERFACES.md):
+
+    mqh/restarts.py  restart_dead_mask(n_frames, game)                      -> bool  (n_frames,)
+    mqh/gaps.py      gap_evidence(ball, players, team_of_slot, pitch, fps)  -> float (n_frames,)
+
+A hook that is absent is simply skipped. A hook that exists but returns the wrong shape or type
+fails loudly with its name, so one stream cannot silently break another.
+"""
+
+import importlib
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from games import GAME, GAMES, half_video_blocks
 from mqh.atd import load_atd
 from mqh.dead import ball_speed_ms, dead_mask
-from mqh.decode import decode_half, team_evidence
+from mqh.decode import team_evidence
+from mqh.decoder import DecoderConfig, decode_half
 
 # FAQ.md: the second half is graded from 110808 but kicks off at 113742; the gap is all dead ball.
 SECOND_HALF_KICKOFF = 113742
 
+HOOKS = {
+    "restarts": ("mqh.restarts", "restart_dead_mask"),
+    "gaps": ("mqh.gaps", "gap_evidence"),
+}
+
 
 @dataclass(frozen=True)
 class Config:
-    """Every knob in one place. v0 values are reasoned, not tuned on this match."""
-    # evidence
+    """Settings of streams 2 and 3 (tracking evidence, tracking dead-ball) plus the decoder.
+
+    Each stream keeps its own constants; stream 5 owns the decoder block. Values are reasoned, not
+    tuned on this match: see docs/DECISIONS.md.
+    """
+    # evidence (stream 3)
     margin_scale_m: float = 2.0      # nearest-player distance gap that saturates the vote
     proximity_scale_m: float = 6.0   # how fast the vote fades when nobody is near the ball
-    # decoder: ~ frames of consistent contrary evidence needed to switch team (25 fps)
-    switch_penalty: float = 30.0
-    # dead ball
+    # dead ball from tracking (stream 2)
     use_pre_kickoff: bool = True
     use_out_of_bounds: bool = True
     oob_margin: float = 0.002        # normalised pitch units
@@ -31,12 +50,55 @@ class Config:
     still_speed_ms: float = 0.5
     still_min_frames: int = 75       # 3 s
     still_close_frames: int = 10
+    # decoder (stream 5)
+    decoder: DecoderConfig = field(default_factory=DecoderConfig)
 
 
-def run(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None):
+def discover_hooks():
+    """{name: function} for every hook module that exists. Absent modules are skipped."""
+    found = {}
+    for key, (module, attr) in HOOKS.items():
+        try:
+            mod = importlib.import_module(module)
+        except ModuleNotFoundError as error:
+            if error.name == module:
+                continue
+            raise
+        if not hasattr(mod, attr):
+            raise AttributeError("{} exists but has no {}(); see docs/INTERFACES.md".format(
+                module, attr))
+        found[key] = getattr(mod, attr)
+    return found
+
+
+def _checked(name, array, n_frames, kind):
+    """Validate what a hook returned, so a bad contract names the culprit."""
+    array = np.asarray(array)
+    if array.shape != (n_frames,):
+        raise ValueError("{}() must return shape ({},), got {}".format(
+            name, n_frames, array.shape))
+    if kind == "bool":
+        if array.dtype != bool:
+            raise ValueError("{}() must return a bool array, got {}".format(name, array.dtype))
+    else:
+        if not np.issubdtype(array.dtype, np.floating) and not np.issubdtype(array.dtype, np.integer):
+            raise ValueError("{}() must return numbers, got {}".format(name, array.dtype))
+        array = array.astype(float)
+        if not np.isfinite(array).all():
+            raise ValueError("{}() returned NaN or inf; use 0 where it has no opinion".format(name))
+    return array
+
+
+def prepare(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None, hooks=None):
+    """Everything before the decoder: (evidence, dead mask, half blocks, n_frames).
+
+    hooks=None finds the optional stream modules automatically; hooks={} disables them; a dict
+    injects functions (used by the tests).
+    """
     n_frames = n_frames or GAMES[game]["n_video_frames"]
     pitch = GAMES[game]["pitch"]
     fps = GAMES[game]["fps"]
+    hooks = discover_hooks() if hooks is None else hooks
 
     ball, players, team_of_slot = load_atd(raw_path, meta_path, n_frames)
     speed = ball_speed_ms(ball, pitch, fps)
@@ -44,13 +106,29 @@ def run(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None):
 
     blocks = half_video_blocks(game)
     second_first = [b for b in blocks if b[0] == 2][0][1]
-    pre = (second_first, SECOND_HALF_KICKOFF - 1)
-    dead = dead_mask(ball, speed, cfg, n_frames, pre_kickoff=pre)
+    dead = dead_mask(ball, speed, cfg, n_frames, pre_kickoff=(second_first, SECOND_HALF_KICKOFF - 1))
 
+    if "restarts" in hooks:
+        dead = dead | _checked("restart_dead_mask", hooks["restarts"](n_frames, game), n_frames, "bool")
+    if "gaps" in hooks:
+        gap = _checked("gap_evidence",
+                       hooks["gaps"](ball, players, team_of_slot, pitch, fps), n_frames, "float")
+        missing = np.isnan(ball[:, 0])
+        evidence = np.where(missing, np.clip(gap, -1.0, 1.0), evidence)
+    return evidence, dead, blocks, n_frames
+
+
+def decode(evidence, dead, blocks, n_frames, dcfg=DecoderConfig()):
+    """Labels for the whole video: decoded inside the graded halves, X everywhere else."""
     labels = np.full(n_frames, "X", dtype="<U1")
     for _, first, last in blocks:
-        labels[first:last + 1] = decode_half(evidence, dead, first, last, cfg)
+        labels[first:last + 1] = decode_half(evidence, dead, first, last, dcfg)
     return labels
+
+
+def run(raw_path, meta_path, cfg=Config(), game=GAME, n_frames=None, hooks=None):
+    evidence, dead, blocks, n_frames = prepare(raw_path, meta_path, cfg, game, n_frames, hooks)
+    return decode(evidence, dead, blocks, n_frames, cfg.decoder)
 
 
 def write_csv(path, labels):

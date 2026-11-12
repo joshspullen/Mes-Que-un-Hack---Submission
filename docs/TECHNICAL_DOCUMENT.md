@@ -29,10 +29,10 @@ alternatives we tried and dropped.
 | asset | used? | how |
 |---|---|---|
 | Tactical ATD (tracking, players + ball) | yes | evidence, dead-ball rules |
-| Smart Tagging | **TODO** (not in v0) | |
-| Homography | **TODO** (not in v0) | |
-| Tactical / broadcast video | **TODO** (not in v0) | |
-| Broadcast ATD | **TODO** (not in v0) | |
+| Smart Tagging | not in v0 — **TODO** update if added | would mark restarts (throw-in, goal kick, corner, free kick, kick-off) as dead-ball anchors |
+| Homography | no | the tracking is already in pitch coordinates, so no pixel conversion is needed |
+| Tactical / broadcast video | no | not processed by any part of the pipeline |
+| Broadcast ATD and homography | no | not frame-aligned to the tactical video; mapping back was out of scope |
 
 Say explicitly which of these we tried and dropped, and why.
 
@@ -78,4 +78,8 @@ python make_submission.py --team-name <team_name>
 python evaluation/validate_submission.py submissions/<team_name>.csv
 ```
 
-Deterministic; no randomness. Verified on a clean clone: **TODO** date and who.
+Deterministic; no randomness. Check with `python tools/repro_check.py` (runs the pipeline twice and
+compares SHA-256 hashes). Hash of the submitted file: **TODO** sha256. Verified on a fresh clone:
+**TODO** date and who.
+
+Environment: pinned in `requirements-lock.txt` (**TODO** generate with `pip freeze` at the freeze).

@@ -19,7 +19,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 import synth  # noqa: E402
-from mqh.pipeline import Config, run, write_csv  # noqa: E402
+from mqh.decoder import DecoderConfig  # noqa: E402
+from mqh.pipeline import Config, discover_hooks, run, write_csv  # noqa: E402
 import evaluation.possession_metrics as pm  # noqa: E402
 
 
@@ -27,7 +28,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         truth = synth.write(tmp)
         raw, meta = os.path.join(tmp, "synth_atd.txt"), os.path.join(tmp, "synth_atd.xml")
-        labels = run(raw, meta, Config())
+        labels = run(raw, meta, Config(), hooks={})
 
         assert labels.shape == (synth.N,), labels.shape
         assert set(np.unique(labels)) <= set("HADX")
@@ -40,7 +41,7 @@ def main():
         write_csv(os.path.join(results, "decoder_v0.csv"), labels)
         # the plain nearest-player vote with a +-50 frame window, for comparison
         write_csv(os.path.join(results, "decoder_noswitch.csv"),
-                  run(raw, meta, Config(switch_penalty=0.0)))
+                  run(raw, meta, Config(decoder=DecoderConfig(switch_penalty=0.0)), hooks={}))
 
         gt = os.path.join(tmp, "synth_gt.csv")
         out = subprocess.run(
@@ -60,11 +61,39 @@ def main():
             change = (lab[1:] != lab[:-1]) & alive[1:]
             return int(alive[0]) + int(change.sum())
 
-        raw_n = n_spells(run(raw, meta, Config(switch_penalty=0.0)))
+        raw_n = n_spells(run(raw, meta, Config(decoder=DecoderConfig(switch_penalty=0.0)), hooks={}))
         ours, true = n_spells(labels), n_spells(truth)
         print("possessions: truth {}  decoder {}  no switch penalty {}".format(true, ours, raw_n))
         assert 0.7 * true < ours < 1.5 * true, "decoder possession count is off"
         assert raw_n > 2 * ours, "switch penalty is not suppressing flicker"
+
+        # --- hooks: the plug-in points for streams 1 and 4 (docs/INTERFACES.md) ---
+        n = synth.N
+        # The synthetic world has no Smart Tagging file, so these tests switch auto-discovery off
+        # (hooks={}) and inject fakes. Streams 1 and 4 test their own modules.
+        none = labels
+        assert set(discover_hooks()) <= {"restarts", "gaps"}, "unknown hook discovered"
+
+        zero_gaps = run(raw, meta, Config(), hooks={"gaps": lambda *a: np.zeros(n)})
+        assert (zero_gaps == none).all(), "a gap hook with no opinion must change nothing"
+
+        truth_dead = truth == "D"
+        with_restarts = run(raw, meta, Config(),
+                            hooks={"restarts": lambda n_frames, game: truth_dead.copy()})
+        assert (with_restarts[truth_dead] == "D").all(), "restart hook mask was not applied"
+        print("hook plumbing ok (dead frames forced to D: {})".format(int(truth_dead.sum())))
+
+        for name, hook, key in [
+                ("restart_dead_mask", lambda n_frames, game: np.zeros(5, dtype=bool), "restarts"),
+                ("restart_dead_mask", lambda n_frames, game: np.zeros(n_frames), "restarts"),
+                ("gap_evidence", lambda *a: np.full(n, np.nan), "gaps")]:
+            try:
+                run(raw, meta, Config(), hooks={key: hook})
+            except ValueError as error:
+                assert name in str(error), str(error)
+            else:
+                raise AssertionError("bad {} hook was accepted".format(name))
+        print("bad hooks are rejected with the hook's name")
     print("OK")
 
 
