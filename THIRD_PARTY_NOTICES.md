@@ -4,6 +4,8 @@ The following files are copied unmodified from the organisers' starter repositor
 (https://github.com/metrica-sports/more-than-a-hack-2027) and remain under its MIT licence:
 
 - `games.py`
+- `starter/load_smart_tagging.py` (Smart Tagging reader, used by `mqh/restarts.py` and
+  `tools/inspect_set_pieces.py`)
 - `evaluation/possession_metrics.py`, `evaluation/run_evaluation.py`, `evaluation/validate_submission.py`
 - `evaluation/gt/BAR-ATH_possession_gt_public.csv` and `..._public_meta.json` (the public 5-minute
   ground truth; for checking the pipeline only, never for training or tuning)

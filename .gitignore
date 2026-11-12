@@ -39,3 +39,6 @@ venv/
 
 # run logs
 *.log
+
+# local inspection figures (frame-level views of the match data)
+inspect/
