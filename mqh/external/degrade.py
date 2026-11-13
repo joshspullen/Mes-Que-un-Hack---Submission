@@ -1,0 +1,87 @@
+"""Make a clean external match look like our automatic tracking (BAR-ATH ATD).
+
+What the ATD is known to look like (DATA.md, label-free): the ball is missing on 41% of graded
+frames, 20.5 players are tracked on average instead of 22, positions are noisy, and the ball tends
+to vanish in crowded or aerial moments. Metrica's sample games already hide the ball during almost
+every stoppage, so only live play needs extra gaps.
+
+Every number below is an ASSUMPTION about BAR-ATH, not a measurement of its labels. The defaults
+put live-play ball dropouts at 25% of live frames; `tools/sim_check.py` prints the same label-free
+statistics for BAR-ATH and for the degraded games so the team can check them on the real tracking
+and change the defaults here if they disagree. Deterministic for a given seed.
+"""
+
+from dataclasses import dataclass
+
+import numpy as np
+from scipy.ndimage import uniform_filter1d
+
+PITCH = np.array([105.0, 68.0])
+
+
+@dataclass(frozen=True)
+class DegradeConfig:
+    live_ball_missing: float = 0.25      # target share of live frames with no ball (incl. existing gaps)
+    gap_median_s: float = 0.8            # lognormal median length of an added ball gap
+    gap_sigma: float = 1.0               # lognormal spread (long tail of multi-second losses)
+    crowd_radius_m: float = 3.0          # a ball with >= crowd_min players this close is easier to lose
+    crowd_min: int = 3
+    crowd_weight: float = 3.0            # relative chance that an added gap starts in a crowd
+    ball_noise_m: float = 0.25
+    player_noise_m: float = 0.10
+    players_tracked: float = 20.5        # mean tracked players per frame on BAR-ATH (DATA.md)
+    dropout_mean_s: float = 2.0          # mean length of a player dropout
+    fps: int = 25
+
+
+def _runs(mask):
+    padded = np.concatenate(([0], mask.astype(np.int8), [0]))
+    d = np.diff(padded)
+    return np.flatnonzero(d == 1), np.flatnonzero(d == -1)
+
+
+def degrade(ball, players, live, seed=0, cfg=DegradeConfig()):
+    """(ball, players) degraded copies. `live` = bool per frame, where extra ball gaps may go."""
+    rng = np.random.default_rng(seed)
+    n = len(ball)
+    ball = ball.copy()
+    players = players.copy()
+
+    # position noise, smooth over ~0.2 s so speeds stay physical
+    for arr, sd in ((ball, cfg.ball_noise_m), (players, cfg.player_noise_m)):
+        noise = uniform_filter1d(rng.normal(0.0, sd, size=arr.shape), 5, axis=0) * np.sqrt(5)
+        arr += noise / PITCH
+
+    # extra ball gaps in live play, preferring crowded moments
+    missing = np.isnan(ball[:, 0])
+    target = int(cfg.live_ball_missing * live.sum())
+    have = int((missing & live).sum())
+    if target > have:
+        xy = ball * PITCH
+        d = np.hypot(*(np.moveaxis(players * PITCH - xy[:, None, :], -1, 0)))
+        crowd = (np.nan_to_num(d, nan=1e9) < cfg.crowd_radius_m).sum(axis=1) >= cfg.crowd_min
+        w = np.where(live & ~missing, np.where(crowd, cfg.crowd_weight, 1.0), 0.0)
+        cand = np.flatnonzero(w > 0)
+        p = w[cand] / w[cand].sum()
+        added = 0
+        while added < target - have and cand.size:
+            start = int(rng.choice(cand, p=p))
+            length = max(1, int(round(rng.lognormal(np.log(cfg.gap_median_s * cfg.fps), cfg.gap_sigma))))
+            seg = slice(start, min(n, start + length))
+            new = live[seg] & ~missing[seg]
+            missing[seg] |= live[seg]
+            added += int(new.sum())
+        ball[missing] = np.nan
+
+    # player dropouts down to the BAR-ATH average
+    seen = ~np.isnan(players[:, :, 0])
+    on_pitch = seen.sum(axis=1).mean()
+    if on_pitch > cfg.players_tracked:
+        drop_share = 1.0 - cfg.players_tracked / on_pitch
+        mean_len = cfg.dropout_mean_s * cfg.fps
+        start_p = drop_share / mean_len / max(1e-9, 1.0 - drop_share)
+        for j in range(players.shape[1]):
+            starts = np.flatnonzero(rng.random(n) < start_p)
+            for s in starts:
+                players[s:s + int(rng.exponential(mean_len)) + 1, j] = np.nan
+    return ball, players

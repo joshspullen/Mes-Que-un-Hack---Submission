@@ -19,7 +19,7 @@ import numpy as np
 
 from games import GAME, GAMES, half_video_blocks
 from mqh.atd import load_atd
-from mqh.dead import ball_speed_ms, dead_mask
+from mqh.dead import DeadConfig, ball_speed_ms, dead_mask, tracking_dead_mask
 from mqh.decode import team_evidence
 from mqh.decoder import DecoderConfig, decode_half
 from mqh.refine import snap_switches
@@ -57,6 +57,9 @@ class Config:
     still_speed_ms: float = 0.5
     still_min_frames: int = 75       # 3 s
     still_close_frames: int = 10
+    # dead ball from tracking, v2 (mqh/dead.py: DeadConfig, weights fitted on external games only).
+    # None = the v0 rules above. External bench: dead-ball F1 0.06 -> 0.78, spellF1 0.31 -> 0.40.
+    dead: object = field(default_factory=DeadConfig)
     # decoder (stream 5)
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
 
@@ -101,26 +104,36 @@ def _checked(name, array, n_frames, kind):
 def _prepare_all(raw_path, meta_path, cfg, game, n_frames, hooks):
     """(evidence, dead, blocks, n_frames, touches) with touches = (frames, teams) or None."""
     n_frames = n_frames or GAMES[game]["n_video_frames"]
-    pitch = GAMES[game]["pitch"]
-    fps = GAMES[game]["fps"]
-    hooks = discover_hooks() if hooks is None else hooks
-
     ball, players, team_of_slot = load_atd(raw_path, meta_path, n_frames)
-    speed = ball_speed_ms(ball, pitch, fps)
-    evidence = team_evidence(ball, players, team_of_slot, pitch, cfg)
-
     blocks = half_video_blocks(game)
     second_first = [b for b in blocks if b[0] == 2][0][1]
-    dead = dead_mask(ball, speed, cfg, n_frames, pre_kickoff=(second_first, SECOND_HALF_KICKOFF - 1))
+    return prepare_arrays(ball, players, team_of_slot, cfg, GAMES[game]["pitch"], GAMES[game]["fps"],
+                          blocks, (second_first, SECOND_HALF_KICKOFF - 1), hooks=hooks, game=game)
 
-    if "restarts" in hooks:
+
+def prepare_arrays(ball, players, team_of_slot, cfg, pitch, fps, blocks, pre_kickoff=None,
+                   hooks=None, game=None):
+    """Everything before the decoder, from tracking arrays: (evidence, dead, blocks, n, touches).
+
+    The same code path for BAR-ATH (via _prepare_all) and for external matches (tools/external_bench.py),
+    so what is measured on other games is exactly what runs on ours. Hooks that need BAR-ATH files
+    (Smart Tagging: `restarts`, `restart_team`) only run when `game` is given.
+    """
+    n_frames = len(ball)
+    hooks = discover_hooks() if hooks is None else hooks
+    speed = ball_speed_ms(ball, pitch, fps)
+    evidence = team_evidence(ball, players, team_of_slot, pitch, cfg)
+    dead = tracking_dead_mask(ball, players, pitch, fps, n_frames, pre_kickoff, cfg.dead) \
+        if cfg.dead is not None else dead_mask(ball, speed, cfg, n_frames, pre_kickoff=pre_kickoff)
+
+    if "restarts" in hooks and game is not None:
         dead = dead | _checked("restart_dead_mask", hooks["restarts"](n_frames, game), n_frames, "bool")
     if "gaps" in hooks:
         gap = _checked("gap_evidence",
                        hooks["gaps"](ball, players, team_of_slot, pitch, fps), n_frames, "float")
         missing = np.isnan(ball[:, 0])
         evidence = np.where(missing, np.clip(gap, -1.0, 1.0), evidence)
-    if "restart_team" in hooks:
+    if "restart_team" in hooks and game is not None:
         push = _checked("restart_evidence", hooks["restart_team"](n_frames, game), n_frames, "float")
         if np.abs(push).max() > 1.0:
             raise ValueError("restart_evidence() must stay within [-1, 1]")

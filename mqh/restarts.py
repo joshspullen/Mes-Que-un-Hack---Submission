@@ -86,3 +86,14 @@ def load_mask(game=None, data_dir=None, n_frames=None, cfg=RestartConfig()):
     fps = GAMES[game]["fps"]
     events = load_smart_tagging(game, data_dir, fps)
     return dead_mask_from_tags(events, n_frames or GAMES[game]["n_video_frames"], cfg, fps)
+
+
+def restart_dead_mask(n_frames, game):
+    """Stream 1 hook (docs/INTERFACES.md): bool (n_frames,), True on the estimated stoppages.
+
+    Without this name the pipeline's hook discovery refused to run (`mqh.restarts exists but has no
+    restart_dead_mask()`). Before trusting the mask, run tools/inspect_set_pieces.py on the real
+    tagging: if the SET PIECES tags are long fixed-length clips rather than ~5 s windows around the
+    restart, the default anchor (the middle of the tag) is far from the real restart.
+    """
+    return load_mask(game=game, n_frames=n_frames)

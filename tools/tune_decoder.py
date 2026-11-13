@@ -32,7 +32,7 @@ from games import GAME, half_video_blocks  # noqa: E402
 from mqh.decoder import DecoderConfig, decode_half  # noqa: E402
 
 GRID = {
-    "switch_penalty": [10.0, 20.0, 30.0, 45.0, 60.0],
+    "switch_penalty": [5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 45.0, 60.0],
     "restart_switch_scale": [0.3, 0.5, 0.7, 1.0],
     "restart_min_dead_frames": [15, 25, 50],
 }
@@ -47,7 +47,8 @@ ABLATION = [
 
 def decode_case(case, cfg):
     labels = np.full(len(case["evidence"]), "X", dtype="<U1")
-    for _, first, last in half_video_blocks(GAME):
+    blocks = case.get("blocks") or half_video_blocks(GAME)
+    for _, first, last in blocks:
         labels[first:last + 1] = decode_half(case["evidence"], case["dead"], first, last, cfg)
     return labels
 
@@ -66,8 +67,11 @@ def load_cases(folder):
     cases = []
     for path in sorted(glob.glob(os.path.join(folder, "*.npz"))):
         z = np.load(path, allow_pickle=False)
-        cases.append({"name": os.path.basename(path), "evidence": z["evidence"].astype(float),
-                      "dead": z["dead"].astype(bool), "truth": z["truth"].astype("<U1")})
+        case = {"name": os.path.basename(path), "evidence": z["evidence"].astype(float),
+                "dead": z["dead"].astype(bool), "truth": z["truth"].astype("<U1")}
+        if "blocks" in z.files:   # external matches carry their own halves (tools/external_bench.py)
+            case["blocks"] = [(i + 1, int(a), int(b)) for i, (a, b) in enumerate(z["blocks"])]
+        cases.append(case)
     return cases
 
 
@@ -134,9 +138,12 @@ def main():
         s = [score(c, DecoderConfig(**kw)) for c in cases]
         print("  {:<30}{:>8.3f}   ".format(name, np.mean(s)) + " ".join("{:.3f}".format(x) for x in s))
 
+    # hold out every case of the same match together (several seeds / label readings per match)
+    group = [c["name"].split("-")[0] for c in cases]
     held, dflt, oracle = [], [], []
     for h in range(len(cases)):
-        rest = [i for i in range(len(cases)) if i != h]
+        rest = [i for i in range(len(cases)) if group[i] != group[h]] or \
+            [i for i in range(len(cases)) if i != h]
         chosen, _, _ = pick(table, rest)
         held.append(table[chosen, h])
         dflt.append(table[default_i, h])
