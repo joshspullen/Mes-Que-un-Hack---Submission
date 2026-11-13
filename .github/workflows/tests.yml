@@ -23,3 +23,6 @@ jobs:
       - run: python tests/test_refine.py
       - run: python tests/test_pipeline.py
       - run: python tests/test_golden.py
+      - run: python tests/test_streams_v2.py
+      - run: python tests/test_evidence.py
+      - run: python tests/test_restarts.py

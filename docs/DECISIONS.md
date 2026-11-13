@@ -122,3 +122,56 @@ tuned on this match.
 | `speed_half_window` | 3 | ball speed from a centred difference over +-3 frames (0.12 s each side at 25 fps); a one-frame difference turns ~0.3 m of jitter into ~10 m/s and every dribble would look like a pass (`test_jitter_is_not_a_pass`) | reasoned |
 | `contest_radius_m` | 1.5 | both teams this close to the ball counts as a duel | reasoned |
 | `contest_floor` | 0.35 | vote multiplier for a fully contested ball: weaker, not zero, so a duel neither drives nor blocks a switch on its own | reasoned |
+
+## External bench, dead ball v2, ball-gap evidence, touches (13 Nov)
+
+Everything below was chosen on **external** matches only: Metrica Sports' three public sample games
+(https://github.com/metrica-sports/sample-data, acknowledged here and in the technical document),
+labels derived from their event data by code (`mqh/external/metrica.py`, two readings of "control":
+`strict` and `loose`), tracking degraded to look like ours (`mqh/external/degrade.py`). BAR-ATH's
+ground truth and video were not read. Commands: `python tools/external_bench.py`,
+`python tools/fit_dead.py`, `python tools/fit_gaps.py`, `python tools/check_touches.py`,
+`python tools/tune_decoder.py --cases .cache/external_cases`.
+
+### Ablation on the external bench (6 cases = 3 games x 2 degradation seeds, strict labels)
+
+| pipeline | spellF1 | macroF1 | dead-ball F1 |
+|---|---|---|---|
+| organisers' baseline (nearest player, +-50 vote) | 0.329 | 0.740 | 0.747* |
+| team branch before this work (v0 dead rules, penalty 30) | 0.308 ±0.011 | 0.465 | 0.056 |
+| + dead ball v2 (stream 2) | 0.387 ±0.008 | 0.759 | 0.766 |
+| + switch penalty 10 (stream 5, tuned leave-one-match-out) | 0.436 ±0.004 | 0.757 | 0.766 |
+| + ball-gap evidence (stream 4) and touches (stream 3b) | **0.457 ±0.009** | **0.769** | 0.766 |
+
+\* The baseline writes `D` whenever the ball is unseen, and Metrica's sample tracking hides the ball
+on 90-99% of dead frames, so its dead-ball F1 here is flattering. On BAR-ATH it scores 0.2433.
+Absolute numbers are against event-derived labels, not the organisers' convention: use them to
+compare variants, not to predict the final score.
+
+### Stream 2 v2 (`mqh/dead.py`: `DeadConfig`, `tracking_dead_mask`)
+
+| choice | value | why | status |
+|---|---|---|---|
+| model | logistic on 4 features | players walk at a stoppage (`walk_abs`, `walk_long`), the ball was last seen near a line (`near_line`), a moving ball is live (`ball_moving`) | fitted on external games, leave-one-game-out AUC 0.92 / 0.92 / 0.92 |
+| `no_ball`, `gap_log` | weight 0 | Metrica's sample data hides the ball at stoppages; these features learn that provider habit. Without them AUC barely moves. `tools/sim_check.py` measures whether BAR-ATH hides it too (inside vs outside set-piece tags); if so, refit with them | decided |
+| `walk_ratio` | weight 0 | collinear with `walk_long` (weights +8.4 / -7.4 together) | decided |
+| speeds over ~1 s (players) and +-0.2 s (ball) | `speed_span_s` 1.0 | frame-to-frame speeds turn tracking jitter into running: under heavy simulated jitter dead-ball F1 fell from 0.77 to 0.00; with these spans it stays 0.76 | measured |
+| `threshold` | 0.5 | 0.4 / 0.5 / 0.6 give 0.411 / 0.403 / 0.375 spellF1 (leave-one-game-out); 0.4 vs 0.5 is inside the noise, so the neutral value stays | measured |
+| `Config.dead` | `DeadConfig()` | `None` switches back to the v0 rules (used by `tests/test_pipeline.py`, whose synthetic players do not slow down at stoppages) | default |
+
+### Stream 5 (`mqh/decoder.py`)
+
+| choice | value | why | status |
+|---|---|---|---|
+| `switch_penalty` | 30 -> **10** | `tune_decoder.py` on 12 external cases, whole matches held out: chosen-on-the-others 0.457 vs default 0.419, gain above the noise (0.006). Checked under lighter and heavier degradation: 10 and 20 are within noise of each other, 30 is worse in both | tuned on external data |
+| `restart_min_dead_frames`, `restart_switch_scale` | unchanged | the tuning keeps them | confirmed |
+| `snap_window_frames` | 0 (unchanged) | with `mqh/touches.py`, windows 6 / 12 / 25 frames gain +0.001 to +0.002 spellF1, inside the noise | measured, kept off |
+| `tune_decoder.py` | holds out every case of a match together; reads per-case halves | several seeds and label readings per match would otherwise leak into the choice | fixed |
+
+### Stream 4 (`mqh/gaps.py`) and stream 3b (`mqh/touches.py`)
+
+| choice | value | why | status |
+|---|---|---|---|
+| gap evidence | width, depth and push differences, logistic without intercept | the team with the ball spreads out and moves forward; antisymmetric so no side is favoured. AUC "home has the ball" 0.83-0.87 on live frames, 0.61-0.67 inside ball gaps | fitted on external games (`tools/fit_gaps.py`) |
+| `GapConfig.weight` | 0.5 | weights 0.25 / 0.5 / 1.0 give 0.475 / 0.476 / 0.475 spellF1 vs 0.459 without; the middle value | measured |
+| touches | velocity change >= 6 m/s over +-0.12 s with a player within 2 m | precision 0.39-0.50 / recall 0.81-0.83 against Metrica pass starts and receptions (event lists miss many touches, so precision is a lower bound) | checked on external events |

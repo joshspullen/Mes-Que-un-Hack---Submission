@@ -1,0 +1,4 @@
+# Only for the tools that fit constants on external matches (tools/fit_dead.py, tools/fit_gaps.py).
+# The submission itself needs requirements.txt only.
+-r requirements.txt
+scikit-learn>=1.3,<2

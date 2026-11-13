@@ -14,7 +14,8 @@ Five ideas, each justified by the structure of the task and not tuned on the mat
    costs `switch_penalty`. A run of L frames can only be supported if its evidence outweighs the
    two switches around it: each frame can swing the score by at most 2, so L > switch_penalty is
    needed. The penalty is therefore a floor on possession length (about 1.2 s of unanimous
-   evidence at 25 fps for the default 30).
+   evidence at 25 fps for 30; the default is 10 since 13 Nov, tuned on external matches, see
+   docs/DECISIONS.md).
 
 2. Cheaper switches after a stoppage. A dead-ball stretch ends the previous possession by
    definition, so continuity of the old team is a weaker prior at a restart than in open play.
@@ -44,7 +45,7 @@ SCALE = 10_000  # evidence and penalties are rounded to 1/SCALE and decoded as i
 
 @dataclass(frozen=True)
 class DecoderConfig:
-    switch_penalty: float = 30.0         # frames' worth of evidence needed to change team
+    switch_penalty: float = 10.0         # frames' worth of evidence needed to change team (external bench, DECISIONS.md)
     restart_switch_scale: float = 0.5    # penalty multiplier right after a stoppage
     restart_min_dead_frames: int = 25    # 1 s: a real stoppage lasts at least this long
     place_switch_in_gaps: bool = True    # idea 3

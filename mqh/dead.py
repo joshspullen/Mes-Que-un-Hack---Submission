@@ -107,12 +107,13 @@ class DeadConfig:
     # logistic weights, same order as FEATURES, then the intercept: fitted by tools/fit_dead.py on
     # Metrica's three sample games (degraded), leave-one-game-out AUC 0.92 / 0.92 / 0.92.
     # walk_ratio, no_ball and gap_log are left at 0 on purpose (see tools/fit_dead.py, DROPPED).
-    weights: tuple = (0.0, -2.8390, -3.1080, 0.0, 0.0, 0.4940, -2.7410)
-    intercept: float = 6.3560
+    weights: tuple = (0.0, -1.4437, -1.1078, 0.0, 0.0, 0.9781, -4.2109)
+    intercept: float = 1.0704
     threshold: float = 0.5           # probability above which a frame is dead
     smooth_frames: int = 25          # +-0.5 s average of the probability before thresholding
     use_pre_kickoff: bool = True
     max_player_speed_ms: float = 12.0   # faster steps are tracking jumps, ignored
+    speed_span_s: float = 1.0           # players' speed = displacement over this span
     baseline_window_s: float = 600.0    # +-5 min running median of the players' speed
     near_line_m: float = 2.0
     moving_ball_ms: float = 3.0
@@ -123,8 +124,12 @@ def dead_features(ball, players, pitch, fps, cfg=DeadConfig()):
     n = len(ball)
     scale = np.asarray(pitch, dtype=float)
     p = players * scale
+    # speed from the displacement over ~1 s (t - k to t + k), not frame to frame: tracking jitter
+    # of a few tens of centimetres per frame would otherwise read as running (external bench,
+    # heavy degradation: dead-ball F1 fell to 0 with frame-to-frame speeds)
+    k = max(1, int(round(cfg.speed_span_s * fps / 2)))
     step = np.full(players.shape[:2], np.nan)
-    step[1:] = np.hypot(*(np.moveaxis(p[1:] - p[:-1], -1, 0))) * fps
+    step[k:-k] = np.hypot(*(np.moveaxis(p[2 * k:] - p[:-2 * k], -1, 0))) * fps / (2 * k)
     step[step > cfg.max_player_speed_ms] = np.nan
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)   # frames with no tracked player
@@ -150,7 +155,10 @@ def dead_features(ball, players, pitch, fps, cfg=DeadConfig()):
             x, y = xy[a - 1]
             edge = min(x, scale[0] - x, y, scale[1] - y)
             near_line[a:b] = float(edge < cfg.near_line_m)
-    speed = ball_speed_ms(ball, pitch, fps)
+    # ball speed over +-0.2 s, not frame to frame, for the same reason as the players' speed
+    k = max(1, int(round(0.2 * fps)))
+    speed = np.full(n, np.nan)
+    speed[k:-k] = np.hypot(*(xy[2 * k:] - xy[:-2 * k]).T) * fps / (2 * k)
     moving = np.nan_to_num(speed, nan=0.0) > cfg.moving_ball_ms
     return np.column_stack([walk_ratio, walk_abs, walk_long, missing.astype(float), gap_log,
                             near_line, moving.astype(float)])

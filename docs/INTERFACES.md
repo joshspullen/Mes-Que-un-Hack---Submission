@@ -14,6 +14,13 @@ files you do not own; `mqh/pipeline.py` is stream 5's and combines everything.
 | 3b touches (optional) | `mqh/touches.py` | `touch_events(ball, players, team_of_slot, pitch, fps)` | `(frames, teams)`: two equal-length 1-D integer arrays, video frames in `[0, n_frames)` and team 0 = home / 1 = away. Used to snap team changes onto the new team's first touch (`mqh/refine.py`). **Inert until `DecoderConfig.snap_window_frames` > 0**, which is decided on external data |
 | 5 decoder + integration | `mqh/decoder.py`, `mqh/pipeline.py` | `decode_half`, `prepare`, `decode`, `run` | labels `H/A/D/X` |
 
+## Status (13 Nov)
+
+`mqh/gaps.py` (stream 4) and `mqh/touches.py` (stream 3b) now exist and are picked up automatically.
+Stream 2 has a v2 (`tracking_dead_mask`, selected by `Config.dead`). `mqh/pipeline.prepare_arrays()`
+runs the same code on any tracking arrays, which is how `tools/external_bench.py` scores the whole
+pipeline on external matches. Numbers and reasons: `docs/DECISIONS.md`, section "External bench".
+
 ## How they are combined
 
 ```
