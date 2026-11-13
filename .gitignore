@@ -37,3 +37,13 @@ venv/
 .idea/
 .vscode/
 submissions/*.manifest.json
+
+# run logs
+*.log
+
+# local inspection figures (frame-level views of the match data)
+inspect/
+
+# external data and cases built from it (downloaded at run time, never committed)
+data/external/
+.cache/
