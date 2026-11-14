@@ -6,10 +6,10 @@ files you do not own; `mqh/pipeline.py` is stream 5's and combines everything.
 
 | stream | file | function | returns |
 |---|---|---|---|
-| 1 dead ball (Smart Tagging) | `mqh/restarts.py` | `restart_dead_mask(n_frames, game)` | `bool (n_frames,)`, True where the ball is dead |
+| 1 dead ball (Smart Tagging) | `mqh/restarts.py` | `restart_dead_mask(n_frames, game, track_dead=None)` | `bool (n_frames,)`, True where the ball is dead. `track_dead` is stream 2's mask, passed by the pipeline when the function accepts it, so each tag is anchored on the tracking stoppage next to it |
 | 2 dead ball (tracking) | `mqh/dead.py` | `dead_mask(ball, speed, cfg, n_frames, pre_kickoff)` (exists) | `bool (n_frames,)` |
 | 3 ball control | `mqh/decode.py` | `team_evidence(ball, players, team_of_slot, pitch, cfg)` (exists) | `float (n_frames,)` in [-1, 1], + home, - away, 0 = no opinion |
-| 1b restart team (extra, optional) | `mqh/restarts.py` | `restart_evidence(n_frames, game)` | `float (n_frames,)` in [-1, 1], + home, - away, 0 = no opinion; a push added to the evidence, e.g. the team awarded a restart from Smart Tagging. Throw-ins carry no team in the tags, so leave them 0 |
+| 1b restart team (extra, optional) | `mqh/restarts.py` | `restart_evidence(n_frames, game, track_dead=None)` (exists since 15 Nov) | `float (n_frames,)` in [-1, 1], + home, - away, 0 = no opinion; a push added to the evidence for 2 s after each tagged restart, towards the team taking it. Throw-ins carry no team in the tags, so they stay 0 |
 | 4 handovers in ball gaps | `mqh/gaps.py` | `gap_evidence(ball, players, team_of_slot, pitch, fps)` | `float (n_frames,)` in [-1, 1], same sign convention; only the frames where the ball is not tracked are used |
 | 3b touches (optional) | `mqh/touches.py` | `touch_events(ball, players, team_of_slot, pitch, fps)` | `(frames, teams)`: two equal-length 1-D integer arrays, video frames in `[0, n_frames)` and team 0 = home / 1 = away. Used to snap team changes onto the new team's first touch (`mqh/refine.py`). **Inert until `DecoderConfig.snap_window_frames` > 0**, which is decided on external data |
 | 5 decoder + integration | `mqh/decoder.py`, `mqh/pipeline.py` | `decode_half`, `prepare`, `decode`, `run` | labels `H/A/D/X` |

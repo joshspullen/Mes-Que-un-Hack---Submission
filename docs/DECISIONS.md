@@ -175,3 +175,38 @@ compare variants, not to predict the final score.
 | gap evidence | width, depth and push differences, logistic without intercept | the team with the ball spreads out and moves forward; antisymmetric so no side is favoured. AUC "home has the ball" 0.83-0.87 on live frames, 0.61-0.67 inside ball gaps | fitted on external games (`tools/fit_gaps.py`) |
 | `GapConfig.weight` | 0.5 | weights 0.25 / 0.5 / 1.0 give 0.475 / 0.476 / 0.475 spellF1 vs 0.459 without; the middle value | measured |
 | touches | velocity change >= 6 m/s over +-0.12 s with a player within 2 m | precision 0.39-0.50 / recall 0.81-0.83 against Metrica pass starts and receptions (event lists miss many touches, so precision is a lower bound) | checked on external events |
+
+## Stream 1: Smart Tagging dead ball v2 and restart team (15 Nov)
+
+Chosen on **external** matches only, with **simulated** tags: Metrica's sample games have no Smart
+Tagging, so `tools/bench_restarts.py` builds tags from their event data the way the organisers'
+starter describes the real ones (a ~5 s window around each restart, team given except for
+throw-ins, 10% of tags dropped). `--shift S` moves every tag by S seconds, to see what happens if
+the real tags are not centred on the restart. Reproduce: `python tools/bench_restarts.py`.
+
+| pipeline (6 cases, strict labels, spellF1) | tags centred | tags 3 s early | tags 3 s late |
+|---|---|---|---|
+| no tags | 0.457 | 0.457 | 0.457 |
+| v1: fixed seconds before the tag's middle (what the branch had) | 0.456 | 0.437 | 0.412 |
+| v2: stoppage taken from the tracking dead runs near the tag, restart clipped into the tag | 0.462 | 0.449 | 0.445 |
+| v2 + `tolerance_s` 2 | 0.460 | 0.449 | 0.454 |
+| v2 + tolerance + restart-team push (**default**) | **0.467** | 0.455 | 0.460 |
+
+Standard error between cases is about ±0.009, so read the differences per case: the default beats
+"no tags" in all 6 cases when the tags are centred (+0.004 to +0.013), and is level with it
+(-0.002 / +0.003 on average) when the tags are 3 s off. v1 is never better than no tags and loses
+0.02 to 0.045 when the tags are off, which is why it is no longer the default.
+
+| constant (`RestartConfig`) | value | why | status |
+|---|---|---|---|
+| `use_tracking` | True | the tracking already finds most stoppages (dead-ball F1 barely moves); what the tag adds is where the stoppage ends and which pieces belong together | measured |
+| `tolerance_s` | 2.0 | 0 is best with centred tags (0.468) but costs 0.010 when tags are 3 s late; 2 costs 0.001 centred and is the best under a shift; 4 and 8 are slightly worse everywhere | measured, chosen for robustness |
+| `bridge_s` | 3.0 | 1 / 3 / 5 give 0.468 / 0.467 / 0.464: flat | measured, kept |
+| `search_before_s` | 60 | 30 / 60 / 90 give 0.466 / 0.467 / 0.467: flat | measured, kept |
+| `push`, `push_s` | 0.5, 2.0 s | strength 0.25 / 0.5 / 1.0 is flat (0.466 / 0.467 / 0.467); duration 1 / 2 / 4 s gives 0.463 / 0.467 / 0.463 | measured |
+| `pre_dead_s` | per type | v1 guesses, now only the fallback when the tracking sees no stoppage near a tag | reasoned, unchanged |
+| `HOME_NAMES`, `AWAY_NAMES` | Barcelona / Athletic | Team tag text to side, by substring; an unmatched name gives no push | **check** the Team values printed by `python starter/load_smart_tagging.py` |
+
+Limits: the tags are simulated, so this validates the mechanism, not the real tagging. Whether the
+real tags sit around the restart is what `tools/inspect_set_pieces.py` shows (tracking only, no
+ground truth). The gain is small (+0.010 at best) and its worst measured case is neutral.

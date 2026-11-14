@@ -10,7 +10,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-from mqh.restarts import RestartConfig, dead_mask_from_tags, restart_frames  # noqa: E402
+import numpy as np  # noqa: E402
+
+from mqh.restarts import (RestartConfig, dead_mask_from_tags, push_from_stoppages,  # noqa: E402
+                          restart_frames, restart_windows, stoppages, team_sign)
 from starter.load_smart_tagging import load  # noqa: E402
 
 XML = """<file><ALL_INSTANCES>
@@ -44,6 +47,31 @@ def main():
     assert dead[2550 - 200:2550].all() and not dead[2550] and not dead[2550 - 201]
     assert dead[7575 - 375:7575].all() and not dead[7575]
     assert dead.sum() == 200 + 375
+    # v2: a tracking stoppage near the tag replaces the fixed duration. Throw-in tag = frames
+    # 2500-2600; the tracking saw the ball dead on 2300-2400 and 2420-2580 (hole of 20 frames).
+    track = np.zeros(20000, dtype=bool)
+    track[2300:2400] = track[2420:2580] = True
+    track[9000:9100] = True                                   # far from any tag: ignored
+    v2 = dead_mask_from_tags(events, 20000, cfg, track_dead=track)
+    assert v2[2300:2580].all() and not v2[2299] and not v2[2580], "tracking anchor / bridge"
+    assert v2[7575 - 375:7575].all() and not v2[7575], "no tracking stoppage -> v1 fallback"
+    assert not v2[9000:9100].any()
+    assert v2.sum() == 280 + 375
+    # the restart may sit up to tolerance_s outside the tag, not further
+    late = np.zeros(20000, dtype=bool)
+    late[2550:2900] = True
+    assert dead_mask_from_tags(events, 20000, cfg, track_dead=late)[2550:2650].all()
+    assert not dead_mask_from_tags(events, 20000, cfg, track_dead=late)[2650:7000].any()
+
+    # restart team: named teams push, throw-ins / unknown names do not
+    assert (team_sign("FC Barcelona"), team_sign("Athletic Club"), team_sign("N/A"), team_sign(None))         == (1, -1, 0, 0)
+    wins = restart_windows(events)
+    assert [w[3] for w in wins] == [0, 0]
+    stops = stoppages([("corner kick", 7500, 7650, -1)], 20000, cfg)
+    push = push_from_stoppages(stops, 20000, RestartConfig(push=0.5, push_s=2.0))
+    assert (push[7575:7625] == -0.5).all() and push[7574] == 0 and push[7625] == 0
+    assert not push_from_stoppages(stops, 20000, RestartConfig(push=0.0)).any()
+
     print("OK  restarts: 2 restarts kept out of 4 tags, mask covers {} frames".format(dead.sum()))
 
 

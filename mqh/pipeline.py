@@ -3,8 +3,8 @@
 Owner: stream 5 (integration). Other streams plug in through two optional hooks, found
 automatically when their files exist (see docs/INTERFACES.md):
 
-    mqh/restarts.py  restart_dead_mask(n_frames, game)                      -> bool  (n_frames,)
-    mqh/restarts.py  restart_evidence(n_frames, game)   (extra, optional)   -> float (n_frames,)
+    mqh/restarts.py  restart_dead_mask(n_frames, game[, track_dead])        -> bool  (n_frames,)
+    mqh/restarts.py  restart_evidence(n_frames, game[, track_dead]) (opt.)  -> float (n_frames,)
     mqh/gaps.py      gap_evidence(ball, players, team_of_slot, pitch, fps)  -> float (n_frames,)
     mqh/touches.py   touch_events(ball, players, team_of_slot, pitch, fps)  -> (frames, teams)
 
@@ -13,6 +13,7 @@ fails loudly with its name, so one stream cannot silently break another.
 """
 
 import importlib
+import inspect
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -62,6 +63,15 @@ class Config:
     dead: object = field(default_factory=DeadConfig)
     # decoder (stream 5)
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
+
+
+def accepts_track_dead(fn):
+    """Does a stream-1 hook take the tracking dead mask (keyword track_dead)? Older hooks and the
+    fakes injected by the tests do not, and are called without it."""
+    try:
+        return "track_dead" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def discover_hooks():
@@ -126,15 +136,20 @@ def prepare_arrays(ball, players, team_of_slot, cfg, pitch, fps, blocks, pre_kic
     dead = tracking_dead_mask(ball, players, pitch, fps, n_frames, pre_kickoff, cfg.dead) \
         if cfg.dead is not None else dead_mask(ball, speed, cfg, n_frames, pre_kickoff=pre_kickoff)
 
+    track_dead = dead.copy()   # stream 2 alone, before the tags are added
     if "restarts" in hooks and game is not None:
-        dead = dead | _checked("restart_dead_mask", hooks["restarts"](n_frames, game), n_frames, "bool")
+        fn = hooks["restarts"]
+        mask = fn(n_frames, game, track_dead=track_dead) if accepts_track_dead(fn) else fn(n_frames, game)
+        dead = dead | _checked("restart_dead_mask", mask, n_frames, "bool")
     if "gaps" in hooks:
         gap = _checked("gap_evidence",
                        hooks["gaps"](ball, players, team_of_slot, pitch, fps), n_frames, "float")
         missing = np.isnan(ball[:, 0])
         evidence = np.where(missing, np.clip(gap, -1.0, 1.0), evidence)
     if "restart_team" in hooks and game is not None:
-        push = _checked("restart_evidence", hooks["restart_team"](n_frames, game), n_frames, "float")
+        fn = hooks["restart_team"]
+        push = fn(n_frames, game, track_dead=track_dead) if accepts_track_dead(fn) else fn(n_frames, game)
+        push = _checked("restart_evidence", push, n_frames, "float")
         if np.abs(push).max() > 1.0:
             raise ValueError("restart_evidence() must stay within [-1, 1]")
         evidence = np.clip(evidence + push, -1.0, 1.0)

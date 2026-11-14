@@ -29,7 +29,7 @@ alternatives we tried and dropped.
 | asset | used? | how |
 |---|---|---|
 | Tactical ATD (tracking, players + ball) | yes | evidence, dead-ball rules |
-| Smart Tagging | not in v0 — **TODO** update if added | would mark restarts (throw-in, goal kick, corner, free kick, kick-off) as dead-ball anchors |
+| Smart Tagging | yes (SET PIECES tags only) | each tagged restart (throw-in, goal kick, corner, free kick, penalty, kick-off after a goal) marks where a stoppage ends and, except for throw-ins, which team restarts. Used as automatic evidence, never as a label |
 | Homography | no | the tracking is already in pitch coordinates, so no pixel conversion is needed |
 | Tactical / broadcast video | no | not processed by any part of the pipeline |
 | Broadcast ATD and homography | no | not frame-aligned to the tactical video; mapping back was out of scope |
@@ -58,7 +58,13 @@ the data is downloaded at run time, not stored in the repository.
   holds its state through gaps and weak evidence).
 - Dead ball (v0, untuned): second-half pre-kickoff gap (frames 110808–113741, per FAQ.md); ball
   tracked outside the pitch (plus a short tail); ball still for 3 s.
-- Restarts and set pieces: **TODO** (Smart Tagging not yet used).
+- Restarts and set pieces: for every Smart Tagging SET PIECES tag, the tracking dead-ball runs that
+  reach the tag (holes under 3 s filled, at most 60 s back) are marked dead up to the restart, the
+  restart being where the tracking says play resumed, kept within 2 s of the tag. If the tracking
+  sees no stoppage there, a fixed duration per restart type before the tag's middle is used. For 2 s
+  after the restart the evidence is pushed (0.5) towards the team named in the tag. Constants
+  chosen on external matches with simulated tags (`tools/bench_restarts.py`, `docs/DECISIONS.md`):
+  spellF1 0.457 without tags, 0.467 with them, and no loss if the tags are 3 s off.
 - Abstention: v0 writes no `X` on graded frames; **TODO** decide whether to abstain inside long ball
   gaps (free on `spellF1`, a miss on `macroF1`).
 

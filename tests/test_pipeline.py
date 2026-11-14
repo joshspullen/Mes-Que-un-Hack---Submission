@@ -75,7 +75,7 @@ def main():
         # The synthetic world has no Smart Tagging file, so these tests switch auto-discovery off
         # (hooks={}) and inject fakes. Streams 1 and 4 test their own modules.
         none = labels
-        assert set(discover_hooks()) <= {"restarts", "gaps", "touches"}, "unknown hook discovered"
+        assert set(discover_hooks()) <= {"restarts", "restart_team", "gaps", "touches"}, "unknown hook discovered"
 
         zero_gaps = run(raw, meta, Config(dead=None), hooks={"gaps": lambda *a: np.zeros(n)})
         assert (zero_gaps == none).all(), "a gap hook with no opinion must change nothing"
