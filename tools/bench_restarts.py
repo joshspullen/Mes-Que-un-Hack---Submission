@@ -43,8 +43,13 @@ def _kind(e, first_kick):
     return None
 
 
-def simulated_windows(game, seed, drop=0.10, half_lo=1.5, half_hi=3.5, shift_s=0.0):
-    """[(kind, a, b, team)] tags around every restart of an external game."""
+def simulated_windows(game, seed, drop=0.10, half_lo=1.5, half_hi=3.5, shift_s=0.0, shape="clip"):
+    """[(kind, a, b, team)] tags around every restart of an external game.
+
+    shape "clip" (default): like the real SET PIECES tags, a fixed 35 s window starting 5-10 s
+    before the restart (on BAR-ATH 53 of 59 tags are 35.0 s long, and the kick found in the
+    tracking sits at 16-29% of the clip, median 20%: a label-free look at the input data). Kick-offs
+    stay ~5 s windows. shape "short": the earlier ~5 s window around the restart."""
     rng = np.random.default_rng(1000 + seed)
     first_kick = {first for _, first, _ in metrica.blocks_of(game)}
     out = []
@@ -58,17 +63,21 @@ def simulated_windows(game, seed, drop=0.10, half_lo=1.5, half_hi=3.5, shift_s=0
             continue
         r = e["start"] + int(round(shift_s * metrica.FPS))
         team = 0 if kind == "throw-in" else (1 if e["team"] == metrica.HOME else -1)
+        if shape == "clip" and not kind.startswith("kick off"):
+            a = int(r - rng.uniform(5.0, 10.0) * metrica.FPS)
+            out.append((kind, a, a + 35 * metrica.FPS, team))
+            continue
         out.append((kind, int(r - u[0] * metrica.FPS), int(r + u[1] * metrica.FPS), team))
     return out
 
 
 def hooks_for(windows, rcfg, base):
-    def dead_hook(n_frames, game, track_dead=None):
-        stops = restarts.stoppages(windows, n_frames, rcfg, metrica.FPS, track_dead)
+    def dead_hook(n_frames, game, track_dead=None, ball_speed=None):
+        stops = restarts.stoppages(windows, n_frames, rcfg, metrica.FPS, track_dead, ball_speed)
         return restarts.dead_from_stoppages(stops, n_frames)
 
-    def team_hook(n_frames, game, track_dead=None):
-        stops = restarts.stoppages(windows, n_frames, rcfg, metrica.FPS, track_dead)
+    def team_hook(n_frames, game, track_dead=None, ball_speed=None):
+        stops = restarts.stoppages(windows, n_frames, rcfg, metrica.FPS, track_dead, ball_speed)
         return restarts.push_from_stoppages(stops, n_frames, rcfg, metrica.FPS)
 
     hooks = {k: v for k, v in base.items() if k not in ("restarts", "restart_team")}
@@ -124,6 +133,7 @@ def main():
     final = restarts.RestartConfig()                      # what make_submission.py runs
     off = replace(final, push=0.0)
     bench(cases, windows, None, "no tags (external baseline)", base)
+    bench(cases, windows, replace(final, detect_kick=False), "v2 (no kick detection), as of 14 Nov", base)
     bench(cases, windows, replace(off, use_tracking=False), "v1: fixed durations, no push", base)
     bench(cases, windows, replace(off, tolerance_s=0.0), "v2: anchored on tracking, clipped to tag", base)
     bench(cases, windows, off, "v2 + tolerance {} s".format(final.tolerance_s), base)

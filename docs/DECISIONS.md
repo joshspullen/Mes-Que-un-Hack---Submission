@@ -242,3 +242,26 @@ All 6 cases improve under both profiles. Team accuracy on live frames: ~0.67 -> 
 | run time | trained at run time from the pinned sample-data commit, cached in `.cache/` keyed by the code and sklearn version | deterministic: single thread, seed 0; two fits give the same evidence hash | checked |
 | `switch_penalty` with it | stays 10 | `tune_decoder.py` on the learned cases: default inside the noise under both profiles | confirmed |
 | `make_submission.py` | learned team on by default, `--no-learned-team` to switch off | `Config.learned_team` stays False so tests and fits need no download | decided |
+
+## First run on the real tracking, stream 1 v3, BAR-ATH profile (15 Nov, evening)
+
+Label-free statistics of BAR-ATH's tracking (`tools/sim_check.py`; no ground truth, no video):
+ball missing 40.7% of graded frames, in few long gaps (1.4 per minute, median 10.7 s, p90 34 s);
+missing 32% inside set-piece tags vs 44% elsewhere (so "no ball" is NOT a stoppage signal here:
+stream 2 was right to leave `no_ball` / `gap_log` out); player positions very smooth (second
+difference 0.001 m); stream 2 finds 25.5% dead ball.
+
+**Smart Tagging shape** (`tools/inspect_set_pieces.py` + an automatic kick search in the tracking):
+53 of the 59 SET PIECES tags are fixed 35.0 s clips (kick-offs 5 s); the kick sits at 16-29% of
+the clip (median 20%, about 7 s in), not in the middle. Stream 1 v2 anchored on the middle.
+
+| choice | value | why | status |
+|---|---|---|---|
+| stream 1 v3: `RestartConfig.detect_kick` | True | the restart is found inside each tag by an algorithm (first kick > 6 m/s after >= 1 s of still or unseen ball), the stoppage runs back from there along the tracking's dead runs; no kick found -> v2 rule. External bench with tags shaped like the real ones (35 s, starting 5-10 s before the restart): no tags 0.457, v2 0.425 (tags hurt), **v3 0.476** | measured (`tools/bench_restarts.py`, tags now `shape="clip"`) |
+| degradation profile `bar_ath` | ball missing 30% of live frames in long gaps (median 10 s), short source gaps interpolated, smooth players, ball offset 2 m | reproduces the statistics above on the external games (41-46% missing, 1.6 gaps/min, median 9-13 s); organisers' baseline scores 0.210 on it vs 0.2433 published | calibrated label-free |
+| learned team model profiles | default + match_like + bar_ath | on the bar_ath profile, leave-one-game-out: no model 0.362, model trained on two profiles 0.408, on all three **0.423**; match-like 0.436 -> 0.431 (noise) | measured |
+| dead-ball weights refitted on the three profiles | not adopted | dead F1 up (0.705 -> 0.727 on bar_ath) but spellF1 down on every profile (-0.005 to -0.012) | measured, kept the 13 Nov weights |
+| decoder on bar_ath cases | defaults kept | `tune_decoder.py`: chosen-on-the-others = default (0.411) | confirmed |
+
+**Real run** (`make_submission.py`, twice): identical SHA-256; 335 possessions over the two halves
+(mean 13 s, median 7-8 s), 30% dead ball. Format valid. The public 5 minutes were not scored.

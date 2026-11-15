@@ -78,7 +78,7 @@ def logo_models(games, cfg):
     from mqh import team_model as tm
     from mqh.external.degrade import PROFILES
 
-    rows = {g["name"]: tm.training_rows([g], [PROFILES["default"], PROFILES["match_like"]], [0, 1],
+    rows = {g["name"]: tm.training_rows([g], [PROFILES[p] for p in tm.TRAIN_PROFILES], [0, 1],
                                         cfg, metrica.PITCH, metrica.FPS) for g in games}
     return {name: tm.fit([r for other, rs in rows.items() if other != name for r in rs]) for name in rows}
 

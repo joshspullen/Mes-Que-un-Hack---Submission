@@ -35,6 +35,7 @@ class DegradeConfig:
     offset_span_s: float = 1.0           # time scale of that error
     stoppage_visible_share: float = 0.0  # share of stoppages where the ball stays visible a while
     stoppage_visible_s: tuple = (1.0, 6.0)   # how long it stays visible (uniform)
+    fill_short_gaps_s: float = 0.0       # interpolate the source's own ball gaps up to this long
     fps: int = 25
 
 
@@ -44,7 +45,15 @@ class DegradeConfig:
 # (no labels) are reproduced on degraded external games. Best of their grid: 25% of live frames
 # lose the ball, ball offset 2.0 m, the ball stays visible after 90% of stoppages for 1-6 s.
 MATCH_LIKE = DegradeConfig(ball_offset_m=2.0, stoppage_visible_share=0.9)
-PROFILES = {"default": DegradeConfig(), "match_like": MATCH_LIKE}
+# A third profile from label-free statistics of BAR-ATH's own tracking (tools/sim_check.py, 15 Nov):
+# the ball is missing on 40.7% of graded frames, in few long gaps (1.4 per minute, median 10.7 s,
+# 90th percentile 34 s), no more often inside set-piece tags (32%) than elsewhere (44%), and player
+# positions are very smooth (second difference 0.001 m). Ball offset and stoppage visibility as in
+# MATCH_LIKE. tools/sim_check.py prints the same statistics for the degraded games.
+BAR_ATH = DegradeConfig(live_ball_missing=0.30, gap_median_s=10.0, gap_sigma=0.8, crowd_weight=1.0,
+                        ball_noise_m=0.05, player_noise_m=0.0, ball_offset_m=2.0,
+                        stoppage_visible_share=0.9, fill_short_gaps_s=1.0)
+PROFILES = {"default": DegradeConfig(), "match_like": MATCH_LIKE, "bar_ath": BAR_ATH}
 
 
 def _runs(mask):
@@ -59,6 +68,19 @@ def degrade(ball, players, live, seed=0, cfg=DegradeConfig()):
     n = len(ball)
     ball = ball.copy()
     players = players.copy()
+
+    if cfg.fill_short_gaps_s > 0:   # our tracking interpolates short losses; Metrica's has many
+        miss = np.isnan(ball[:, 0])
+        starts, ends = _runs(miss)
+        idx = np.arange(n)
+        ok = ~miss
+        if ok.sum() > 1:
+            fx = np.interp(idx, idx[ok], ball[ok, 0])
+            fy = np.interp(idx, idx[ok], ball[ok, 1])
+            limit = cfg.fill_short_gaps_s * cfg.fps
+            for a, b in zip(starts, ends):
+                if a > 0 and b < n and b - a <= limit:
+                    ball[a:b, 0], ball[a:b, 1] = fx[a:b], fy[a:b]
 
     # the ball stays in view for a while after many stoppages (Metrica's sample data hides it at
     # once, our automatic tracking often does not): hold its last position, drifting slowly

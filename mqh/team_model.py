@@ -28,6 +28,7 @@ from mqh.gaps import shape_features
 from mqh.touches import touch_events
 
 SAMPLE_DATA_COMMIT = "e706dd506b360d69d9d123d5b8026e7294b13996"   # metrica-sports/sample-data
+TRAIN_PROFILES = ("default", "match_like", "bar_ath")   # mqh/external/degrade.py
 SUBSAMPLE = 5                  # every 5th frame for training: neighbours are near-duplicates
 HGB_PARAMS = dict(max_iter=200, learning_rate=0.08, max_leaf_nodes=31, l2_regularization=1.0,
                   early_stopping=False, random_state=0)
@@ -148,7 +149,7 @@ def default_model(cfg, cache_dir):
             return pickle.load(handle)
     root = fetch_pinned()
     games = [metrica.load_game(k, root) for k in (1, 2, 3)]
-    rows = training_rows(games, [PROFILES["default"], PROFILES["match_like"]], [0, 1], cfg,
+    rows = training_rows(games, [PROFILES[p] for p in TRAIN_PROFILES], [0, 1], cfg,
                          metrica.PITCH, metrica.FPS)
     model = fit(rows)
     os.makedirs(cache_dir, exist_ok=True)

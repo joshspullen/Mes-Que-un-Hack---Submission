@@ -57,11 +57,17 @@ def main():
     parser.add_argument("--dir", default=DEFAULT_DIR)
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1])
     parser.add_argument("--drop", nargs="*", default=list(DROPPED), help="features to leave out")
+    parser.add_argument("--profiles", nargs="+", default=["default"],
+                        help="degradation profiles to fit on (mqh/external/degrade.py)")
     args = parser.parse_args()
 
     cfg = DeadConfig()
     games = [metrica.load_game(n, fetch(args.dir)) for n in (1, 2, 3)]
-    rows = table(build_inputs(games, args.seeds), cfg)
+    from mqh.external.degrade import PROFILES
+    rows = {}
+    for prof in args.profiles:
+        part = table(build_inputs(games, args.seeds, PROFILES[prof]), cfg)
+        rows.update({"{}-{}".format(k, prof): v for k, v in part.items()})
     keep = [i for i, f in enumerate(FEATURES) if f not in args.drop]
 
     print("leave-one-game-out (train on two games, test on the third):")

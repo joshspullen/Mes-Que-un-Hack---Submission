@@ -148,9 +148,11 @@ def prepare_arrays(ball, players, team_of_slot, cfg, pitch, fps, blocks, pre_kic
         if cfg.dead is not None else dead_mask(ball, speed, cfg, n_frames, pre_kickoff=pre_kickoff)
 
     track_dead = dead.copy()   # stream 2 alone, before the tags are added
+    from mqh.restarts import kick_speed
+    extra = {"track_dead": track_dead, "ball_speed": kick_speed(ball, pitch, fps)}
     if "restarts" in hooks and game is not None:
         fn = hooks["restarts"]
-        mask = fn(n_frames, game, track_dead=track_dead) if accepts_track_dead(fn) else fn(n_frames, game)
+        mask = fn(n_frames, game, **_accepted(fn, extra))
         dead = dead | _checked("restart_dead_mask", mask, n_frames, "bool")
     if "gaps" in hooks:
         gap = _checked("gap_evidence",
@@ -163,7 +165,7 @@ def prepare_arrays(ball, players, team_of_slot, cfg, pitch, fps, blocks, pre_kic
         evidence = tm.evidence(team_model, anti, sym)
     if "restart_team" in hooks and game is not None:
         fn = hooks["restart_team"]
-        push = fn(n_frames, game, track_dead=track_dead) if accepts_track_dead(fn) else fn(n_frames, game)
+        push = fn(n_frames, game, **_accepted(fn, extra))
         push = _checked("restart_evidence", push, n_frames, "float")
         if np.abs(push).max() > 1.0:
             raise ValueError("restart_evidence() must stay within [-1, 1]")
@@ -172,6 +174,17 @@ def prepare_arrays(ball, players, team_of_slot, cfg, pitch, fps, blocks, pre_kic
     if "touches" in hooks:
         touches = _checked_touches(hooks["touches"](ball, players, team_of_slot, pitch, fps), n_frames)
     return evidence, dead, blocks, n_frames, touches
+
+
+def _accepted(fn, kwargs):
+    """The keyword arguments among `kwargs` that hook `fn` declares (older hooks take fewer)."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return {}
+    if any(p.kind == p.VAR_KEYWORD for p in params.values()):
+        return dict(kwargs)
+    return {k: v for k, v in kwargs.items() if k in params}
 
 
 def _checked_touches(result, n_frames):

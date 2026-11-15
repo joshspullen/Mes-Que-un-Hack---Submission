@@ -66,6 +66,15 @@ class RestartConfig:
     tolerance_s: float = 2.0        # tracking stoppages may reach this far outside the tag window
     push: float = 0.5               # restart-team push on the evidence, 0 = off
     push_s: float = 2.0             # seconds after the restart that the push lasts
+    # v3: find the kick inside the tag. Real SET PIECES tags are fixed 35 s clips (53 of 59 on
+    # BAR-ATH; kick-offs 5 s), so the tag's middle is ~10 s after the restart. The restart is
+    # taken as the first kick (ball faster than kick_ms) after the ball has been still or unseen
+    # for still_s, searched over the whole tag; the stoppage runs from the start of that stillness
+    # (extended back along the tracking's dead runs). No kick found -> the v2 rule below.
+    detect_kick: bool = True
+    kick_ms: float = 6.0
+    still_ms: float = 1.5
+    still_s: float = 1.0
 
 
 def _lower(value):
@@ -123,7 +132,23 @@ def _bridge(mask, max_gap):
     return out
 
 
-def stoppages(windows, n_frames, cfg=RestartConfig(), fps=25, track_dead=None):
+def _kick(speed, a, b, cfg, fps):
+    """(still_start, kick_frame) of the first kick after a still / unseen ball inside [a, b), or None."""
+    w = speed[a:b]
+    slow = ~(np.nan_to_num(w, nan=0.0) >= cfg.still_ms)
+    need = int(round(cfg.still_s * fps))
+    run = 0
+    for i in range(len(w)):
+        if slow[i]:
+            run += 1
+            continue
+        if run >= need and w[i] >= cfg.kick_ms:
+            return a + i - run, a + i
+        run = 0
+    return None
+
+
+def stoppages(windows, n_frames, cfg=RestartConfig(), fps=25, track_dead=None, ball_speed=None):
     """[(kind, dead_start, restart, team)] for every usable tag: [dead_start, restart) is dead."""
     closed = None
     if cfg.use_tracking and track_dead is not None:
@@ -141,7 +166,17 @@ def stoppages(windows, n_frames, cfg=RestartConfig(), fps=25, track_dead=None):
             continue
         anchor = int(round(a + cfg.anchor_frac * (b - a)))
         found = None
-        if closed is not None:
+        if cfg.detect_kick and ball_speed is not None:
+            hit = _kick(ball_speed, a, b, cfg, fps)
+            if hit is not None:
+                start, kick = hit
+                if closed is not None and start > 0 and closed[start - 1]:
+                    lo = max(start - back, 0)
+                    runs_s, runs_e = _runs(closed[lo:start])
+                    if len(runs_s):
+                        start = lo + int(runs_s[-1])
+                found = (int(start), int(kick))
+        if found is None and closed is not None:
             lo = max(anchor - back, 0)
             hi = min(b + tol, n_frames)
             s, e = _runs(closed[lo:hi])
@@ -177,10 +212,20 @@ def push_from_stoppages(stops, n_frames, cfg=RestartConfig(), fps=25):
     return np.clip(push, -1.0, 1.0)
 
 
-def dead_mask_from_tags(events, n_frames, cfg=RestartConfig(), fps=25, track_dead=None):
+def dead_mask_from_tags(events, n_frames, cfg=RestartConfig(), fps=25, track_dead=None,
+                        ball_speed=None):
     """Boolean per-frame mask: True on the estimated stoppage before each tagged restart."""
-    return dead_from_stoppages(stoppages(restart_windows(events), n_frames, cfg, fps, track_dead),
-                               n_frames)
+    return dead_from_stoppages(stoppages(restart_windows(events), n_frames, cfg, fps, track_dead,
+                                         ball_speed), n_frames)
+
+
+def kick_speed(ball, pitch, fps):
+    """Ball speed (m/s) over +-0.2 s, NaN where the ball is not tracked: what _kick() reads."""
+    xy = ball * np.asarray(pitch, dtype=float)
+    k = max(1, int(round(0.2 * fps)))
+    speed = np.full(len(ball), np.nan)
+    speed[k:-k] = np.hypot(*(xy[2 * k:] - xy[:-2 * k]).T) * fps / (2 * k)
+    return speed
 
 
 def _events(game, data_dir=None):
@@ -189,25 +234,26 @@ def _events(game, data_dir=None):
     return load_smart_tagging(game, data_dir, fps), fps
 
 
-def load_mask(game=None, data_dir=None, n_frames=None, cfg=RestartConfig(), track_dead=None):
+def load_mask(game=None, data_dir=None, n_frames=None, cfg=RestartConfig(), track_dead=None,
+              ball_speed=None):
     """Convenience: read the game's tagging file and return the mask over the whole video."""
     from games import GAME, GAMES
     game = game or GAME
     events, fps = _events(game, data_dir)
     return dead_mask_from_tags(events, n_frames or GAMES[game]["n_video_frames"], cfg, fps,
-                               track_dead)
+                               track_dead, ball_speed)
 
 
-def restart_dead_mask(n_frames, game, track_dead=None):
+def restart_dead_mask(n_frames, game, track_dead=None, ball_speed=None):
     """Stream 1 hook (docs/INTERFACES.md): bool (n_frames,), True on the estimated stoppages.
 
     track_dead is the tracking dead-ball mask (stream 2); the pipeline passes it so the tags can be
     anchored on it. Without it this is the v1 fixed-duration mask.
     """
-    return load_mask(game=game, n_frames=n_frames, track_dead=track_dead)
+    return load_mask(game=game, n_frames=n_frames, track_dead=track_dead, ball_speed=ball_speed)
 
 
-def restart_evidence(n_frames, game, track_dead=None, cfg=RestartConfig()):
+def restart_evidence(n_frames, game, track_dead=None, cfg=RestartConfig(), ball_speed=None):
     """Stream 1b hook: float (n_frames,) in [-1, 1], a push towards the team taking each restart.
 
     All zeros if RestartConfig.push is 0 or no Team tag matches HOME_NAMES / AWAY_NAMES.
@@ -215,6 +261,6 @@ def restart_evidence(n_frames, game, track_dead=None, cfg=RestartConfig()):
     if cfg.push <= 0:
         return np.zeros(n_frames)
     events, fps = _events(game)
-    stops = stoppages(restart_windows(events), n_frames, cfg, fps, track_dead)
+    stops = stoppages(restart_windows(events), n_frames, cfg, fps, track_dead, ball_speed)
     return push_from_stoppages(stops, n_frames, cfg, fps)
 
