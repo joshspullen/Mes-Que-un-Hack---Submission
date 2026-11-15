@@ -24,7 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import evaluation.possession_metrics as pm  # noqa: E402
 from mqh.external import metrica  # noqa: E402
-from mqh.external.degrade import DegradeConfig, degrade  # noqa: E402
+from mqh.external.degrade import PROFILES, DegradeConfig, degrade  # noqa: E402
 from mqh.pipeline import Config, decode, prepare_arrays  # noqa: E402
 
 DEFAULT_DIR = os.path.join(ROOT, "data", "external", "metrica-sample-data")
@@ -64,18 +64,30 @@ def scores(truth, labels):
             "true_poss": pm.possession_stats(gt, runs)["n_spells"]}
 
 
-def run_case(case, cfg, hooks):
+def run_case(case, cfg, hooks, team_model=None):
     name, ball, players, team_of_slot, blocks, truths = case
     evidence, dead, blocks, n, touches = prepare_arrays(
-        ball, players, team_of_slot, cfg, metrica.PITCH, metrica.FPS, blocks, hooks=hooks)
+        ball, players, team_of_slot, cfg, metrica.PITCH, metrica.FPS, blocks, hooks=hooks,
+        team_model=team_model)
     labels = decode(evidence, dead, blocks, n, cfg.decoder, touches)
     return {c: scores(t, labels) for c, t in truths.items()}, (evidence, dead, blocks)
 
 
-def bench(cases, cfg=Config(), hooks=None, verbose=True, label=""):
+def logo_models(games, cfg):
+    """{game name: team model trained on the OTHER games} (stream 3c, leave-one-game-out)."""
+    from mqh import team_model as tm
+    from mqh.external.degrade import PROFILES
+
+    rows = {g["name"]: tm.training_rows([g], [PROFILES["default"], PROFILES["match_like"]], [0, 1],
+                                        cfg, metrica.PITCH, metrica.FPS) for g in games}
+    return {name: tm.fit([r for other, rs in rows.items() if other != name for r in rs]) for name in rows}
+
+
+def bench(cases, cfg=Config(), hooks=None, verbose=True, label="", models=None):
     rows = []
     for case in cases:
-        res, _ = run_case(case, cfg, hooks)
+        model = models[case[0].split("-")[0]] if models else None
+        res, _ = run_case(case, cfg, hooks, model)
         rows.append((case[0], res))
         if verbose:
             r = res["strict"]
@@ -92,10 +104,11 @@ def bench(cases, cfg=Config(), hooks=None, verbose=True, label=""):
     return summary
 
 
-def write_cases(cases, cfg, hooks, folder):
+def write_cases(cases, cfg, hooks, folder, models=None):
     os.makedirs(folder, exist_ok=True)
     for case in cases:
-        _, (evidence, dead, blocks) = run_case(case, cfg, hooks)
+        model = models[case[0].split("-")[0]] if models else None
+        _, (evidence, dead, blocks) = run_case(case, cfg, hooks, model)
         for conv, truth in case[5].items():
             np.savez_compressed(os.path.join(folder, "{}-{}.npz".format(case[0], conv)),
                                 evidence=evidence, dead=dead, truth=truth,
@@ -109,16 +122,22 @@ def main():
     parser.add_argument("--games", type=int, nargs="+", default=[1, 2, 3])
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1])
     parser.add_argument("--write-cases", metavar="DIR")
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="default",
+                        help="degradation profile (mqh/external/degrade.py)")
+    parser.add_argument("--learned", action="store_true",
+                        help="add stream 3c, each game scored by a model trained on the other two")
     args = parser.parse_args()
 
     root = fetch(args.dir)
     games = [metrica.load_game(n, root) for n in args.games]
-    cases = build_inputs(games, args.seeds)
-    print("external bench: {} cases (Metrica sample games {}, seeds {})".format(
-        len(cases), args.games, args.seeds))
-    bench(cases, Config(), hooks=None, label="current pipeline")
+    cases = build_inputs(games, args.seeds, PROFILES[args.profile])
+    print("external bench: {} cases (Metrica sample games {}, seeds {}, profile {})".format(
+        len(cases), args.games, args.seeds, args.profile))
+    models = logo_models(games, Config()) if args.learned else None
+    bench(cases, Config(), hooks=None, label="current pipeline" + (" + learned team" if models else ""),
+          models=models)
     if args.write_cases:
-        write_cases(cases, Config(), None, args.write_cases)
+        write_cases(cases, Config(), None, args.write_cases, models)
 
 
 if __name__ == "__main__":

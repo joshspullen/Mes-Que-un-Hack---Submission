@@ -210,3 +210,35 @@ Standard error between cases is about ±0.009, so read the differences per case:
 Limits: the tags are simulated, so this validates the mechanism, not the real tagging. Whether the
 real tags sit around the restart is what `tools/inspect_set_pieces.py` shows (tracking only, no
 ground truth). The gain is small (+0.010 at best) and its worst measured case is neutral.
+
+## Learned team evidence (stream 3c) and the match-like profile (15 Nov)
+
+External only, as above. Reproduce: `python tools/external_bench.py --profile match_like --learned`
+(and without `--profile` for the default one).
+
+**Match-like degradation profile** (`mqh/external/degrade.py: MATCH_LIKE`). Parameters taken from a
+label-free calibration published by another team (MikolajEkiert/more-than-a-hack-2027,
+docs/DECISIONS.md, 14 Nov): 25% of live frames lose the ball, ball offset ~2 m, the ball stays
+visible after 90% of stoppages for 1-6 s. Check: the organisers' baseline (smooth50) scores 0.216
+on it, against 0.2433 published for the real match (0.329 on the default profile, too easy).
+
+**Where the points are** (oracle test, match-like, 6 cases): our pipeline 0.360; with perfect dead
+ball 0.433 (+0.07); with team evidence 60% perfect 0.799 (+0.44). Team evidence is the bottleneck.
+
+| pipeline (spellF1, strict labels, mean of 6 cases) | default profile | match-like profile |
+|---|---|---|
+| organisers' baseline smooth50 | 0.329 | 0.216 |
+| hand-built evidence (13 Nov state + stream 1 v2) | 0.457 ±0.009 | 0.360 ±0.010 |
+| + learned team evidence, leave-one-game-out | **0.545 ±0.012** | **0.436 ±0.008** |
+
+All 6 cases improve under both profiles. Team accuracy on live frames: ~0.67 -> ~0.86.
+
+| choice | value | why | status |
+|---|---|---|---|
+| model | HistGradientBoosting, 200 trees, lr 0.08, 31 leaves, l2 1.0, no early stopping | logistic regression on the same features gives 0.389 (match-like), boosted trees 0.426; settings are sklearn-like defaults, not tuned | measured |
+| features | 15 antisymmetric (distance / count differences, stream-3 score, team shape, last / next touch team, ±1/3/10 s context) + 5 symmetric (ball speed, ball seen, nearest distance, time since / until a touch) | what stream 3, 3b and 4 already compute, in context | reasoned |
+| team swap | every training frame also shown swapped; prediction = mean of the frame and its swap | evidence(swap) = -evidence exactly (tested), so neither side is favoured | by construction |
+| training data | 3 Metrica games x 2 profiles x 2 seeds, `strict` labels, every 5th live frame | both profiles so the model does not depend on one guess of our tracking | decided |
+| run time | trained at run time from the pinned sample-data commit, cached in `.cache/` keyed by the code and sklearn version | deterministic: single thread, seed 0; two fits give the same evidence hash | checked |
+| `switch_penalty` with it | stays 10 | `tune_decoder.py` on the learned cases: default inside the noise under both profiles | confirmed |
+| `make_submission.py` | learned team on by default, `--no-learned-team` to switch off | `Config.learned_team` stays False so tests and fits need no download | decided |

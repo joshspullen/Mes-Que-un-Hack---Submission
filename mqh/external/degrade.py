@@ -31,7 +31,20 @@ class DegradeConfig:
     player_noise_m: float = 0.10
     players_tracked: float = 20.5        # mean tracked players per frame on BAR-ATH (DATA.md)
     dropout_mean_s: float = 2.0          # mean length of a player dropout
+    ball_offset_m: float = 0.0           # slowly varying error of the ball position (std, metres)
+    offset_span_s: float = 1.0           # time scale of that error
+    stoppage_visible_share: float = 0.0  # share of stoppages where the ball stays visible a while
+    stoppage_visible_s: tuple = (1.0, 6.0)   # how long it stays visible (uniform)
     fps: int = 25
+
+
+# A second profile, closer to our match. Its numbers come from a label-free calibration published
+# by another team (MikolajEkiert/more-than-a-hack-2027, docs/DECISIONS.md, 14 Nov, profile
+# `match_like`): fitted so that agreement statistics between two pipelines on the real tracking
+# (no labels) are reproduced on degraded external games. Best of their grid: 25% of live frames
+# lose the ball, ball offset 2.0 m, the ball stays visible after 90% of stoppages for 1-6 s.
+MATCH_LIKE = DegradeConfig(ball_offset_m=2.0, stoppage_visible_share=0.9)
+PROFILES = {"default": DegradeConfig(), "match_like": MATCH_LIKE}
 
 
 def _runs(mask):
@@ -47,10 +60,35 @@ def degrade(ball, players, live, seed=0, cfg=DegradeConfig()):
     ball = ball.copy()
     players = players.copy()
 
+    # the ball stays in view for a while after many stoppages (Metrica's sample data hides it at
+    # once, our automatic tracking often does not): hold its last position, drifting slowly
+    if cfg.stoppage_visible_share > 0:
+        dead = ~live
+        starts = np.flatnonzero(dead & np.concatenate(([False], ~dead[:-1])))
+        for a in starts:
+            if rng.random() >= cfg.stoppage_visible_share:
+                continue
+            seen = np.flatnonzero(~np.isnan(ball[max(0, a - 2 * cfg.fps):a + 1, 0]))
+            if seen.size == 0:
+                continue
+            last = ball[max(0, a - 2 * cfg.fps) + seen[-1]].copy()
+            length = int(rng.uniform(*cfg.stoppage_visible_s) * cfg.fps)
+            end = a + length
+            while end > a and not dead[min(end, n) - 1]:
+                end -= 1
+            span = slice(a, min(n, end))
+            drift = np.cumsum(rng.normal(0, 0.02, size=(span.stop - span.start, 2)), axis=0) / PITCH
+            ball[span] = last + drift
+
     # position noise, smooth over ~0.2 s so speeds stay physical
     for arr, sd in ((ball, cfg.ball_noise_m), (players, cfg.player_noise_m)):
         noise = uniform_filter1d(rng.normal(0.0, sd, size=arr.shape), 5, axis=0) * np.sqrt(5)
         arr += noise / PITCH
+    if cfg.ball_offset_m > 0:
+        span = max(1, int(cfg.offset_span_s * cfg.fps))
+        off = uniform_filter1d(rng.normal(0.0, 1.0, size=ball.shape), span, axis=0)
+        off *= cfg.ball_offset_m / max(1e-9, off.std())
+        ball += off / PITCH
 
     # extra ball gaps in live play, preferring crowded moments
     missing = np.isnan(ball[:, 0])

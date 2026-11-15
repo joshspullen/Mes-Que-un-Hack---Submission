@@ -80,6 +80,23 @@ def test_touch_at_a_deflection_only():
     assert abs(int(frames[0]) - t0) <= 2 and int(teams[0]) == 0, (frames, teams)
 
 
+def test_learned_team_evidence_is_antisymmetric():
+    from mqh import team_model as tm
+    n = 40 * FPS
+    ball, players, team = world(n, seed=2)
+    ball_n, players_n = ball / PITCH, players / PITCH
+    base = np.tanh((np.random.default_rng(3).normal(size=n)))
+    anti, sym = tm.team_features(ball_n, players_n, team, PITCH, FPS, base)
+    truth = np.where(base > 0, "H", "A")
+    model = tm.fit([(anti, sym, truth)])
+    e = tm.evidence(model, anti, sym)
+    anti_s, sym_s = tm.team_features(ball_n, players_n, 1 - team, PITCH, FPS, -base)
+    e_s = tm.evidence(model, anti_s, sym_s)
+    assert np.isfinite(e).all() and np.abs(e).max() <= 1.0
+    assert np.allclose(e, -e_s, atol=1e-9)
+    assert ((e > 0) == (base > 0)).mean() > 0.9
+
+
 def main():
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

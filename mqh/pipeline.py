@@ -14,6 +14,7 @@ fails loudly with its name, so one stream cannot silently break another.
 
 import importlib
 import inspect
+import os
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -24,6 +25,8 @@ from mqh.dead import DeadConfig, ball_speed_ms, dead_mask, tracking_dead_mask
 from mqh.decode import team_evidence
 from mqh.decoder import DecoderConfig, decode_half
 from mqh.refine import snap_switches
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # FAQ.md: the second half is graded from 110808 but kicks off at 113742; the gap is all dead ball.
 SECOND_HALF_KICKOFF = 113742
@@ -61,6 +64,9 @@ class Config:
     # dead ball from tracking, v2 (mqh/dead.py: DeadConfig, weights fitted on external games only).
     # None = the v0 rules above. External bench: dead-ball F1 0.06 -> 0.78, spellF1 0.31 -> 0.40.
     dead: object = field(default_factory=DeadConfig)
+    # stream 3c: learned team evidence (mqh/team_model.py), trained at run time on external games.
+    # make_submission.py turns it on; off by default so tests and fits need no external download.
+    learned_team: bool = False
     # decoder (stream 5)
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
 
@@ -117,12 +123,17 @@ def _prepare_all(raw_path, meta_path, cfg, game, n_frames, hooks):
     ball, players, team_of_slot = load_atd(raw_path, meta_path, n_frames)
     blocks = half_video_blocks(game)
     second_first = [b for b in blocks if b[0] == 2][0][1]
+    model = None
+    if cfg.learned_team:
+        from mqh import team_model as tm
+        model = tm.default_model(cfg, os.path.join(ROOT, ".cache"))
     return prepare_arrays(ball, players, team_of_slot, cfg, GAMES[game]["pitch"], GAMES[game]["fps"],
-                          blocks, (second_first, SECOND_HALF_KICKOFF - 1), hooks=hooks, game=game)
+                          blocks, (second_first, SECOND_HALF_KICKOFF - 1), hooks=hooks, game=game,
+                          team_model=model)
 
 
 def prepare_arrays(ball, players, team_of_slot, cfg, pitch, fps, blocks, pre_kickoff=None,
-                   hooks=None, game=None):
+                   hooks=None, game=None, team_model=None):
     """Everything before the decoder, from tracking arrays: (evidence, dead, blocks, n, touches).
 
     The same code path for BAR-ATH (via _prepare_all) and for external matches (tools/external_bench.py),
@@ -146,6 +157,10 @@ def prepare_arrays(ball, players, team_of_slot, cfg, pitch, fps, blocks, pre_kic
                        hooks["gaps"](ball, players, team_of_slot, pitch, fps), n_frames, "float")
         missing = np.isnan(ball[:, 0])
         evidence = np.where(missing, np.clip(gap, -1.0, 1.0), evidence)
+    if team_model is not None:   # stream 3c: learned evidence, fed with everything above
+        from mqh import team_model as tm
+        anti, sym = tm.team_features(ball, players, team_of_slot, pitch, fps, evidence)
+        evidence = tm.evidence(team_model, anti, sym)
     if "restart_team" in hooks and game is not None:
         fn = hooks["restart_team"]
         push = fn(n_frames, game, track_dead=track_dead) if accepts_track_dead(fn) else fn(n_frames, game)

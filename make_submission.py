@@ -27,10 +27,13 @@ def main():
     parser.add_argument("--team-name", required=True, help="registered team name (names the file)")
     parser.add_argument("--out-dir", default=os.path.join(HERE, "submissions"))
     parser.add_argument("--switch-penalty", type=float, default=DecoderConfig.switch_penalty)
+    parser.add_argument("--no-learned-team", action="store_true",
+                        help="skip stream 3c (the learned team model trained on external games)")
     args = parser.parse_args()
 
     meta_path, raw_path = require(["atd_meta", "atd_raw"])
-    cfg = Config(decoder=DecoderConfig(switch_penalty=args.switch_penalty))
+    cfg = Config(decoder=DecoderConfig(switch_penalty=args.switch_penalty),
+                 learned_team=not args.no_learned_team)
     hooks = discover_hooks()
     print("optional streams active:", ", ".join(sorted(hooks)) or "none")
     labels = run(raw_path, meta_path, cfg, hooks=hooks)
