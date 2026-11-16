@@ -47,3 +47,6 @@ inspect/
 # external data and cases built from it (downloaded at run time, never committed)
 data/external/
 .cache/
+
+# the two trained models are committed on purpose (made from external data only, tools/train_models.py)
+!models/*.pkl

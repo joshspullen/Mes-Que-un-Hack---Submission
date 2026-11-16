@@ -36,6 +36,8 @@ class DegradeConfig:
     stoppage_visible_share: float = 0.0  # share of stoppages where the ball stays visible a while
     stoppage_visible_s: tuple = (1.0, 6.0)   # how long it stays visible (uniform)
     fill_short_gaps_s: float = 0.0       # interpolate the source's own ball gaps up to this long
+    dead_ball_missing: float = 0.0       # share of stoppages where a source that keeps tracking
+                                         # the dead ball (TRACAB) loses it after 1-6 s
     fps: int = 25
 
 
@@ -44,7 +46,7 @@ class DegradeConfig:
 # `match_like`): fitted so that agreement statistics between two pipelines on the real tracking
 # (no labels) are reproduced on degraded external games. Best of their grid: 25% of live frames
 # lose the ball, ball offset 2.0 m, the ball stays visible after 90% of stoppages for 1-6 s.
-MATCH_LIKE = DegradeConfig(ball_offset_m=2.0, stoppage_visible_share=0.9)
+MATCH_LIKE = DegradeConfig(ball_offset_m=2.0, stoppage_visible_share=0.9, dead_ball_missing=0.35)
 # A third profile from label-free statistics of BAR-ATH's own tracking (tools/sim_check.py, 15 Nov):
 # the ball is missing on 40.7% of graded frames, in few long gaps (1.4 per minute, median 10.7 s,
 # 90th percentile 34 s), no more often inside set-piece tags (32%) than elsewhere (44%), and player
@@ -52,7 +54,7 @@ MATCH_LIKE = DegradeConfig(ball_offset_m=2.0, stoppage_visible_share=0.9)
 # MATCH_LIKE. tools/sim_check.py prints the same statistics for the degraded games.
 BAR_ATH = DegradeConfig(live_ball_missing=0.30, gap_median_s=10.0, gap_sigma=0.8, crowd_weight=1.0,
                         ball_noise_m=0.05, player_noise_m=0.0, ball_offset_m=2.0,
-                        stoppage_visible_share=0.9, fill_short_gaps_s=1.0)
+                        stoppage_visible_share=0.9, fill_short_gaps_s=1.0, dead_ball_missing=0.35)
 PROFILES = {"default": DegradeConfig(), "match_like": MATCH_LIKE, "bar_ath": BAR_ATH}
 
 
@@ -111,6 +113,14 @@ def degrade(ball, players, live, seed=0, cfg=DegradeConfig()):
         off = uniform_filter1d(rng.normal(0.0, 1.0, size=ball.shape), span, axis=0)
         off *= cfg.ball_offset_m / max(1e-9, off.std())
         ball += off / PITCH
+
+    # a provider that tracks the dead ball (TRACAB) still loses it at some stoppages in ours
+    if cfg.dead_ball_missing > 0:
+        dead = ~live
+        starts, ends = _runs(dead)
+        for a, b in zip(starts, ends):
+            if rng.random() < cfg.dead_ball_missing:
+                ball[min(b, a + int(rng.uniform(1.0, 6.0) * cfg.fps)):b] = np.nan
 
     # extra ball gaps in live play, preferring crowded moments
     missing = np.isnan(ball[:, 0])

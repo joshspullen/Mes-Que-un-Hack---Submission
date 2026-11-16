@@ -265,3 +265,24 @@ the clip (median 20%, about 7 s in), not in the middle. Stream 1 v2 anchored on 
 
 **Real run** (`make_submission.py`, twice): identical SHA-256; 335 possessions over the two halves
 (mean 13 s, median 7-8 s), 30% dead ball. Format valid. The public 5 minutes were not scored.
+
+## Engine v4: 30 external matches, learned dead ball, joint decoder (16 Nov)
+
+Data: Metrica 3 + SkillCorner 20 (MIT) + IDSSE/DFL 7 (CC-BY 4.0), loaders in `mqh/external/`,
+cases cached by `tools/build_external_cache.py`, scored by 5-fold CV grouped by match
+(`tools/bench_all.py`, out-of-fold predictions kept for the decoder and tag checks).
+
+| decision | evidence | result |
+|---|---|---|
+| learned dead-ball model (`mqh/dead_model.py`, 45 features) replaces stream 2 | spellF1 0.360 → 0.465 (`bar_ath`, all providers), dead macroF1 0.605 → 0.825 | adopted |
+| joint H/A/D decoder (`mqh/decoder3.py`), team 10 / stop 20 / restart 20 / min 1 s | 0.4667 → 0.482 on the OOF predictions, gain on each held-out provider | adopted |
+| `dead_ball_missing` in the degradation (ball dropped soon after a stoppage starts, 35%) | label-free: on BAR-ATH the ball is not missing more inside tagged set pieces than elsewhere, so a dead ball does not imply a visible ball | adopted in `bar_ath`, `match_like` |
+| models trained once on both profiles (60 cases) and committed | `tools/train_models.py --check`: byte-identical retrain | adopted |
+| Smart Tagging in v4 | simulated clip tags on Metrica: 0.4669 → 0.4612 (gentlest variant 0.4653), inside the noise; on BAR-ATH without tags only 37% of tagged kicks end a predicted stoppage and 50% of tagged stoppages are dead, with tags 72% and 85%. The tags are real evidence on the real match, the simulation is not | kept on (`--no-tags` to switch off) |
+| self-training on the target match (`mqh/self_train.py`) | first held-out target (Metrica 1): 0.431 → 0.426 | dropped |
+| broadcast cutaways (`mqh/broadcast.py`) | SkillCorner, cutaways known: dead F1 0.916 → 0.919 | not used (noise); code kept, `V4Config.cutaway_fusion` |
+| referee whistle (`mqh/whistle.py`) | 360 detections on BAR-ATH, 14–16% within 2 s of a predicted stoppage boundary (v3 and v4 alike) | not used |
+
+Calibration check (label-free on our side): predicted dead share on held-out matches 0.44 (IDSSE,
+truth 0.45), 0.46 (SkillCorner, truth 0.47), 0.37 (Metrica, truth 0.29); BAR-ATH v4: 0.47.
+BAR-ATH v4 file: 194 possessions, mean 17.3 s; identical on two runs.

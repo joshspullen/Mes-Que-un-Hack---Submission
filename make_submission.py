@@ -28,15 +28,27 @@ def main():
     parser.add_argument("--out-dir", default=os.path.join(HERE, "submissions"))
     parser.add_argument("--switch-penalty", type=float, default=DecoderConfig.switch_penalty)
     parser.add_argument("--no-learned-team", action="store_true",
-                        help="skip stream 3c (the learned team model trained on external games)")
+                        help="v3 only: skip stream 3c (the learned team model trained on external games)")
+    parser.add_argument("--engine", choices=("v4", "v3"), default="v4",
+                        help="v4 (default): learned P(home) and P(dead) from models/, tags, joint "
+                             "H/A/D decoder; v3: the hand-built streams and the two-step decoder")
+    parser.add_argument("--no-tags", action="store_true", help="v4 only: ignore the Smart Tagging file")
     args = parser.parse_args()
 
     meta_path, raw_path = require(["atd_meta", "atd_raw"])
-    cfg = Config(decoder=DecoderConfig(switch_penalty=args.switch_penalty),
-                 learned_team=not args.no_learned_team)
-    hooks = discover_hooks()
-    print("optional streams active:", ", ".join(sorted(hooks)) or "none")
-    labels = run(raw_path, meta_path, cfg, hooks=hooks)
+    if args.engine == "v4":
+        from dataclasses import replace
+        from mqh.v4 import V4Config, predict
+        cfg = replace(V4Config(), use_tags=not args.no_tags)
+        hooks = {"v4": True}
+        print("engine v4: models/ (see models/MANIFEST.json), tags", "off" if args.no_tags else "on")
+        labels = predict(raw_path, meta_path, cfg)
+    else:
+        cfg = Config(decoder=DecoderConfig(switch_penalty=args.switch_penalty),
+                     learned_team=not args.no_learned_team)
+        hooks = discover_hooks()
+        print("optional streams active:", ", ".join(sorted(hooks)) or "none")
+        labels = run(raw_path, meta_path, cfg, hooks=hooks)
 
     os.makedirs(args.out_dir, exist_ok=True)
     out = os.path.join(args.out_dir, args.team_name + ".csv")
