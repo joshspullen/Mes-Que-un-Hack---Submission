@@ -122,7 +122,9 @@ def main():
     if not os.path.isfile(doc):
         report("FAIL", "technical document missing: " + args.doc)
     else:
-        n = open(doc).read().count("TODO")
+        text = open(doc).read()
+        # the final run fills these two placeholders: the file's sha256 and the one-time check
+        n = text.count("TODO") + text.count("SHA256_HERE") + text.count("FINAL_CHECK_RESULT")
         if n:
             report(strict, "{} TODO(s) left in {}".format(n, args.doc))
         else:
