@@ -285,4 +285,4 @@ cases cached by `tools/build_external_cache.py`, scored by 5-fold CV grouped by 
 
 Calibration check (label-free on our side): predicted dead share on held-out matches 0.44 (IDSSE,
 truth 0.45), 0.46 (SkillCorner, truth 0.47), 0.37 (Metrica, truth 0.29); BAR-ATH v4: 0.47.
-BAR-ATH v4 file: 194 possessions, mean 17.3 s; identical on two runs.
+BAR-ATH v4 file: 195 possessions (94 + 101 per half), mean 17.2 s, dead ball 47% of graded frames; identical on two runs, on two different machines (cloud and Mac VM) for the tests, and the sha256 of the submitted file is in the technical document.

@@ -108,7 +108,7 @@ touches (inside the noise).
 - The degradation is a model of our tracking, not our tracking; the gap between external scores and
   the real match is unknown until the final check.
 - External labels follow three conventions, none identical to the organisers'; possession counts on
-  the match (194, mean 17 s) depend on that convention.
+  the match (195, mean 17 s) depend on that convention.
 
 ## 7. Reproduction
 
@@ -121,5 +121,5 @@ python -m pytest tests -q
 
 Deterministic; the models are committed. To retrain them from scratch (optional, ~10 min, needs the
 external data in `data/external/`): `python tools/build_external_cache.py`, then
-`python tools/train_models.py --check`. Hash of the submitted file: SHA256_HERE (printed by
+`python tools/train_models.py --check`. Hash of the submitted file: `e4da4f8b95470da40d4d963c52590b4329522cfea21574694dd24ae1cfbdfcb1` (printed by
 `make_submission.py` and stored in `submissions/<team_name>.manifest.json`).
