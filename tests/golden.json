@@ -1,0 +1,47 @@
+{
+  "config": {
+    "dead": {
+      "baseline_window_s": 600.0,
+      "intercept": 1.0704,
+      "max_player_speed_ms": 12.0,
+      "moving_ball_ms": 3.0,
+      "near_line_m": 2.0,
+      "smooth_frames": 25,
+      "speed_span_s": 1.0,
+      "threshold": 0.5,
+      "use_pre_kickoff": true,
+      "weights": [
+        0.0,
+        -1.4437,
+        -1.1078,
+        0.0,
+        0.0,
+        0.9781,
+        -4.2109
+      ]
+    },
+    "decoder": {
+      "clean_dead_mask": true,
+      "info_min": 0.05,
+      "min_live_between_dead_frames": 25,
+      "place_switch_in_gaps": true,
+      "restart_min_dead_frames": 25,
+      "restart_switch_scale": 0.5,
+      "snap_window_frames": 0,
+      "switch_penalty": 10.0
+    },
+    "margin_scale_m": 2.0,
+    "oob_close_frames": 50,
+    "oob_margin": 0.002,
+    "oob_tail_frames": 25,
+    "proximity_scale_m": 6.0,
+    "still_close_frames": 10,
+    "still_min_frames": 75,
+    "still_speed_ms": 0.5,
+    "use_out_of_bounds": true,
+    "use_pre_kickoff": true,
+    "use_stationary": true
+  },
+  "labels_sha256": "f3987cf35adbff9d1ff18eea33d4d2ee9e591eccb16e824282c41163fafb7695",
+  "world": "synth turnover=0.4 seed=11 dead_flip=0.5"
+}

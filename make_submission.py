@@ -17,24 +17,46 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from games import require  # noqa: E402
-from mqh.pipeline import Config, run, write_csv  # noqa: E402
+from mqh import manifest  # noqa: E402
+from mqh.decoder import DecoderConfig  # noqa: E402
+from mqh.pipeline import Config, discover_hooks, run, write_csv  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--team-name", required=True, help="registered team name (names the file)")
     parser.add_argument("--out-dir", default=os.path.join(HERE, "submissions"))
-    parser.add_argument("--switch-penalty", type=float, default=Config.switch_penalty)
+    parser.add_argument("--switch-penalty", type=float, default=DecoderConfig.switch_penalty)
+    parser.add_argument("--no-learned-team", action="store_true",
+                        help="v3 only: skip stream 3c (the learned team model trained on external games)")
+    parser.add_argument("--engine", choices=("v4", "v3"), default="v4",
+                        help="v4 (default): learned P(home) and P(dead) from models/, tags, joint "
+                             "H/A/D decoder; v3: the hand-built streams and the two-step decoder")
+    parser.add_argument("--no-tags", action="store_true", help="v4 only: ignore the Smart Tagging file")
     args = parser.parse_args()
 
     meta_path, raw_path = require(["atd_meta", "atd_raw"])
-    cfg = Config(switch_penalty=args.switch_penalty)
-    labels = run(raw_path, meta_path, cfg)
+    if args.engine == "v4":
+        from dataclasses import replace
+        from mqh.v4 import V4Config, predict
+        cfg = replace(V4Config(), use_tags=not args.no_tags)
+        hooks = {"v4": True}
+        print("engine v4: models/ (see models/MANIFEST.json), tags", "off" if args.no_tags else "on")
+        labels = predict(raw_path, meta_path, cfg)
+    else:
+        cfg = Config(decoder=DecoderConfig(switch_penalty=args.switch_penalty),
+                     learned_team=not args.no_learned_team)
+        hooks = discover_hooks()
+        print("optional streams active:", ", ".join(sorted(hooks)) or "none")
+        labels = run(raw_path, meta_path, cfg, hooks=hooks)
 
     os.makedirs(args.out_dir, exist_ok=True)
     out = os.path.join(args.out_dir, args.team_name + ".csv")
     write_csv(out, labels)
     print("wrote", out)
+    info = manifest.build(args.team_name, out, labels, cfg, hooks, HERE)
+    print("manifest", manifest.write(os.path.join(args.out_dir, args.team_name + ".manifest.json"), info))
+    print("sha256", info["sha256"])
     for lab in "HADX":
         print("  {} {:>7}".format(lab, int(np.sum(labels == lab))))
 

@@ -1,0 +1,12 @@
+{
+  "sklearn": "1.9.1",
+  "training_cases": 60,
+  "profiles": [
+    "bar_ath",
+    "match_like"
+  ],
+  "files": {
+    "team_model.pkl": "dfeb5abd174744fc23d2785c832adfb546c5f917d3902cfc3c09fb5401cdec9e",
+    "dead_model.pkl": "6501da6cfd8817d5982759644c53275c96bfab8030700788ddbd6107acc11a3b"
+  }
+}

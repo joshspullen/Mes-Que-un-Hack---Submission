@@ -8,7 +8,11 @@ Rules (each can be switched off in Config):
   * stationary    -- the ball is tracked but essentially not moving for a couple of seconds.
 """
 
+import warnings
+from dataclasses import dataclass
+
 import numpy as np
+from scipy.ndimage import median_filter, uniform_filter1d
 
 
 def ball_speed_ms(ball, pitch, fps, max_gap=5):
@@ -70,6 +74,109 @@ def dead_mask(ball, speed, cfg, n_frames, pre_kickoff=None):
             if b - a >= cfg.still_min_frames:
                 dead[a:b] = True
 
+    if cfg.use_pre_kickoff and pre_kickoff is not None:
+        dead[pre_kickoff[0]:pre_kickoff[1] + 1] = True
+    return dead
+
+
+
+# ---------------------------------------------------------------------------------------------
+# v2: a calibrated dead-ball probability from the tracking (stream 2)
+#
+# Seven label-free features of the tracking, combined by a logistic model whose weights were fitted
+# on EXTERNAL matches only (Metrica's three sample games, degraded to look like our ATD; see
+# tools/fit_dead.py, which reproduces them and prints the leave-one-game-out scores). The weights
+# are frozen below as constants, so the submission needs no external data at run time.
+#
+#   walk_ratio   log(players' median speed / its own median over +-5 min): players walk at a stoppage
+#   walk_abs     players' median speed (m/s), smoothed over +-2 s
+#   walk_long    walk_ratio smoothed over +-5 s (stoppages last several seconds)
+#   no_ball      the ball is not tracked on this frame
+#   gap_log      log(1 + seconds since the ball was last seen), 0 when it is seen
+#   near_line    the ball was last seen within 2 m of a touch / goal line before this gap
+#   ball_moving  the ball is seen and moving faster than 3 m/s (a live ball)
+#
+# Only "a stoppage makes players slow down" and "the ball leaves over a line" are assumed about
+# football; no constant refers to a frame of the hackathon match.
+
+FEATURES = ("walk_ratio", "walk_abs", "walk_long", "no_ball", "gap_log", "near_line", "ball_moving")
+
+
+@dataclass(frozen=True)
+class DeadConfig:
+    # logistic weights, same order as FEATURES, then the intercept: fitted by tools/fit_dead.py on
+    # Metrica's three sample games (degraded), leave-one-game-out AUC 0.92 / 0.92 / 0.92.
+    # walk_ratio, no_ball and gap_log are left at 0 on purpose (see tools/fit_dead.py, DROPPED).
+    weights: tuple = (0.0, -1.4437, -1.1078, 0.0, 0.0, 0.9781, -4.2109)
+    intercept: float = 1.0704
+    threshold: float = 0.5           # probability above which a frame is dead
+    smooth_frames: int = 25          # +-0.5 s average of the probability before thresholding
+    use_pre_kickoff: bool = True
+    max_player_speed_ms: float = 12.0   # faster steps are tracking jumps, ignored
+    speed_span_s: float = 1.0           # players' speed = displacement over this span
+    baseline_window_s: float = 600.0    # +-5 min running median of the players' speed
+    near_line_m: float = 2.0
+    moving_ball_ms: float = 3.0
+
+
+def dead_features(ball, players, pitch, fps, cfg=DeadConfig()):
+    """(n_frames, len(FEATURES)) float array, finite everywhere."""
+    n = len(ball)
+    scale = np.asarray(pitch, dtype=float)
+    p = players * scale
+    # speed from the displacement over ~1 s (t - k to t + k), not frame to frame: tracking jitter
+    # of a few tens of centimetres per frame would otherwise read as running (external bench,
+    # heavy degradation: dead-ball F1 fell to 0 with frame-to-frame speeds)
+    k = max(1, int(round(cfg.speed_span_s * fps / 2)))
+    step = np.full(players.shape[:2], np.nan)
+    step[k:-k] = np.hypot(*(np.moveaxis(p[2 * k:] - p[:-2 * k], -1, 0))) * fps / (2 * k)
+    step[step > cfg.max_player_speed_ms] = np.nan
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)   # frames with no tracked player
+        med = np.nanmedian(step, axis=1)
+    fill = np.nanmedian(med) if np.isfinite(med).any() else 1.0
+    med = np.where(np.isfinite(med), med, fill)
+    walk_abs = uniform_filter1d(med, 2 * fps + 1)
+    sub = max(1, fps)
+    coarse = walk_abs[::sub]
+    base = median_filter(coarse, size=int(2 * cfg.baseline_window_s) + 1, mode="nearest")
+    base = np.repeat(base, sub)[:n]
+    walk_ratio = np.log(np.maximum(walk_abs, 0.05) / np.maximum(base, 0.05))
+    walk_long = uniform_filter1d(walk_ratio, 10 * fps + 1)
+
+    xy = ball * scale
+    missing = np.isnan(ball[:, 0])
+    gap_log = np.zeros(n)
+    near_line = np.zeros(n)
+    starts, ends = _runs(missing)
+    for a, b in zip(starts, ends):
+        gap_log[a:b] = np.log1p(np.arange(1, b - a + 1) / fps)
+        if a > 0:
+            x, y = xy[a - 1]
+            edge = min(x, scale[0] - x, y, scale[1] - y)
+            near_line[a:b] = float(edge < cfg.near_line_m)
+    # ball speed over +-0.2 s, not frame to frame, for the same reason as the players' speed
+    k = max(1, int(round(0.2 * fps)))
+    speed = np.full(n, np.nan)
+    speed[k:-k] = np.hypot(*(xy[2 * k:] - xy[:-2 * k]).T) * fps / (2 * k)
+    moving = np.nan_to_num(speed, nan=0.0) > cfg.moving_ball_ms
+    return np.column_stack([walk_ratio, walk_abs, walk_long, missing.astype(float), gap_log,
+                            near_line, moving.astype(float)])
+
+
+def dead_probability(ball, players, pitch, fps, cfg=DeadConfig()):
+    """Per-frame probability that the ball is dead, from the frozen logistic weights."""
+    z = dead_features(ball, players, pitch, fps, cfg) @ np.asarray(cfg.weights) + cfg.intercept
+    prob = 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
+    if cfg.smooth_frames > 1:
+        prob = uniform_filter1d(prob, cfg.smooth_frames)
+    return prob
+
+
+def tracking_dead_mask(ball, players, pitch, fps, n_frames, pre_kickoff=None, cfg=None):
+    """Stream 2, v2: bool (n_frames,), True where the tracking says the ball is dead."""
+    cfg = cfg or DeadConfig()
+    dead = dead_probability(ball, players, pitch, fps, cfg) >= cfg.threshold
     if cfg.use_pre_kickoff and pre_kickoff is not None:
         dead[pre_kickoff[0]:pre_kickoff[1] + 1] = True
     return dead

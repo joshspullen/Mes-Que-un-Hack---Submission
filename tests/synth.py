@@ -22,7 +22,7 @@ N_SLOTS = 46
 KICKOFF_2 = 113742
 
 
-def make(seed=7):
+def make(seed=7, turnover_frac=0.0, dead_flip_prob=1.0):
     rng = np.random.RandomState(seed)
     truth = np.full(N, "X", dtype="<U1")
     ball = np.full((N, 2), np.nan)
@@ -64,7 +64,7 @@ def make(seed=7):
                 seg += step
             t = end
             # dead stretch between possessions, except right at the end of the half
-            if t <= last:
+            if t <= last and (turnover_frac <= 0 or rng.rand() >= turnover_frac):
                 dd = int(rng.uniform(75, 200))
                 de = min(last + 1, t + dd)
                 truth[t:de] = "D"
@@ -75,7 +75,8 @@ def make(seed=7):
                     ball[t:de] += rng.normal(0, 0.00002, (de - t, 2))
                 players[t:de] = players[t - 1][None]
                 t = de
-                team = 1 - team
+                if dead_flip_prob >= 1 or rng.rand() < dead_flip_prob:
+                    team = 1 - team      # else the same team keeps the ball after the stoppage
             else:
                 team = 1 - team
 
@@ -92,9 +93,9 @@ def make(seed=7):
     return truth, ball, players
 
 
-def write(out_dir):
+def write(out_dir, turnover_frac=0.0, seed=7, dead_flip_prob=1.0):
     os.makedirs(out_dir, exist_ok=True)
-    truth, ball, players = make()
+    truth, ball, players = make(seed=seed, turnover_frac=turnover_frac, dead_flip_prob=dead_flip_prob)
 
     with open(os.path.join(out_dir, "synth_atd.txt"), "w") as f:
         for i in range(N):

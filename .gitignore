@@ -36,6 +36,17 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+submissions/*.manifest.json
 
 # run logs
 *.log
+
+# local inspection figures (frame-level views of the match data)
+inspect/
+
+# external data and cases built from it (downloaded at run time, never committed)
+data/external/
+.cache/
+
+# the two trained models are committed on purpose (made from external data only, tools/train_models.py)
+!models/*.pkl

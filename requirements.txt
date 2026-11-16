@@ -1,2 +1,5 @@
 numpy>=1.24,<3
 pandas>=2.0,<4
+scipy>=1.10,<2
+# stream 3c (mqh/team_model.py): the model is trained at run time; pin the version for a bit-identical file
+scikit-learn==1.9.1
