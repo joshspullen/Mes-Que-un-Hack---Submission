@@ -13,10 +13,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt pytest
       - name: No match data, private ground truth or environments are tracked
         run: |
-          if git ls-files | grep -Ei '(\.mp4$|_atd\.(txt|xml)$|_homography\.csv$|_smart_tagging\.xml$|_possession_gt(_meta|_reference)?\.(csv|json)$|^\.venv/|\.(parquet|feather|npy|npz|pkl)$|^data/[^.])'; then
+          if git ls-files | grep -v '^models/\(dead\|team\)_model\.pkl$' | grep -Ei '(\.mp4$|_atd\.(txt|xml)$|_homography\.csv$|_smart_tagging\.xml$|_possession_gt(_meta|_reference)?\.(csv|json)$|^\.venv/|\.(parquet|feather|npy|npz|pkl)$|^data/[^.])'; then
             echo "A file that must never be public is tracked by git"; exit 1
           fi
       - run: python tests/test_decoder.py
@@ -26,3 +26,4 @@ jobs:
       - run: python tests/test_streams_v2.py
       - run: python tests/test_evidence.py
       - run: python tests/test_restarts.py
+      - run: python -m pytest tests/test_v4.py -q

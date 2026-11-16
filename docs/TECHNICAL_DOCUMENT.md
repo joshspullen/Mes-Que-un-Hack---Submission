@@ -1,9 +1,9 @@
 # Technical document — Mes Que un Hack
 
-*v1, 16 Nov 2026 (engine v4). Rename to `<team_name>.md` (or export to `<team_name>.pdf`) for
-submission and fill the three **TODO** fields.*
+*v1, 16 Nov 2026 (engine v4).*
 
-Team: **TODO team name** · Members: **TODO** · Repository: **TODO public URL**
+Team: **Omicron** · Members: Josh Pullen (joshspullen), JFM (jfm006), Nassim (Nassim374), Elio (elioelioelio9) ·
+Repository: https://github.com/joshspullen/Mes-Que-un-Hack---Submission
 
 ## 1. Approach
 
@@ -94,7 +94,8 @@ the file is identical on two runs; predicted dead share 47% of graded frames (th
 44–46% on IDSSE and SkillCorner, where the truth is 45–47%); 72% of the tagged kicks fall within
 2 s of the end of a predicted stoppage. Without the tags only 37% do, which is why the tags stay on
 although simulated tags on Metrica did not help (−0.006, inside the noise). The public 5 minutes are
-scored once, after the freeze, with `final_check.py`: **TODO** number.
+scored once, on the frozen file, only to catch an alignment or format bug
+(`python evaluation/run_evaluation.py`): FINAL_CHECK_RESULT.
 
 Tried and dropped: self-training on the provided match with confident pseudo-labels (first held-out
 check 0.431 → 0.426), broadcast cutaways and whistle (section 2), snapping possession changes onto
@@ -120,5 +121,5 @@ python -m pytest tests -q
 
 Deterministic; the models are committed. To retrain them from scratch (optional, ~10 min, needs the
 external data in `data/external/`): `python tools/build_external_cache.py`, then
-`python tools/train_models.py --check`. Hash of the submitted file: **TODO** sha256 (printed by
+`python tools/train_models.py --check`. Hash of the submitted file: SHA256_HERE (printed by
 `make_submission.py` and stored in `submissions/<team_name>.manifest.json`).

@@ -33,7 +33,9 @@ FORBIDDEN = [
     "*.parquet", "*.feather", "*.npy", "*.npz", "*.pkl",
     "cache/*", "features/*",
 ]
-ALLOWED = {"data/.gitkeep"}
+# the two trained models are committed on purpose: made from external matches only (see
+# models/MANIFEST.json and tools/train_models.py), they contain no data of the provided game
+ALLOWED = {"data/.gitkeep", "models/dead_model.pkl", "models/team_model.pkl"}
 BIG_BYTES = 5 * 1024 * 1024
 
 results = []
