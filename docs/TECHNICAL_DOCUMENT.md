@@ -95,7 +95,10 @@ the file is identical on two runs; predicted dead share 47% of graded frames (th
 2 s of the end of a predicted stoppage. Without the tags only 37% do, which is why the tags stay on
 although simulated tags on Metrica did not help (−0.006, inside the noise). The public 5 minutes are
 scored once, on the frozen file, only to catch an alignment or format bug
-(`python evaluation/run_evaluation.py`): FINAL_CHECK_RESULT.
+(`python evaluation/run_evaluation.py`): run once, on the frozen file (sha256 below): macroF1 0.892, spellF1 0.571, with
+11 possessions predicted against 17 in the ground truth. The public sample has only 17 possessions,
+so spellF1 there carries a very wide band (the organisers' own note); we read it only as "frames and
+labels are aligned", and nothing was changed afterwards.
 
 Tried and dropped: self-training on the provided match with confident pseudo-labels (first held-out
 check 0.431 → 0.426), broadcast cutaways and whistle (section 2), snapping possession changes onto
